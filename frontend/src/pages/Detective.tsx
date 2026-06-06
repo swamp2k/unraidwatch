@@ -398,10 +398,6 @@ export function Detective() {
   const [elapsed, setElapsed] = useState(0);
   const [overlayIndex, setOverlayIndex] = useState<number | null>(null);
 
-  const displayed = activeHistoryId
-    ? undefined  // filled by historyDetail query below
-    : result;
-
   const { data: history = [] } = useQuery<Investigation[]>({
     queryKey: ['detective-history'],
     queryFn: () => api.get('/api/detective/history'),
