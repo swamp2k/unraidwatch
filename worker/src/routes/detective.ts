@@ -4,7 +4,7 @@ import { authMiddleware } from '../middleware/auth';
 import { decrypt } from '../services/encryption';
 import {
   getStats, getContainers, getArray, getShares, getSyslog, getContainerLogs,
-  getShareConfigs, getPlugins,
+  getShareConfigs, getPlugins, getContainerDetails,
 } from '../services/unraidClient';
 import { filterSyslogByHours } from './ai';
 
@@ -43,6 +43,17 @@ const TOOLS = [
     },
   },
   {
+    name: 'get_container_details',
+    description: 'Get full configuration for a Docker container: image name/tag, all volume mounts and host paths, port mappings, environment variables, labels, and network mode. Use whenever a container problem may involve incorrect paths, missing mounts, misconfigured environment, port conflicts, or network issues.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        name: { type: 'string', description: 'Container name (leave empty to return details for ALL containers)' },
+      },
+      required: [],
+    },
+  },
+  {
     name: 'get_system_stats',
     description: 'Get current CPU %, RAM %, average temperature, and uptime.',
     input_schema: { type: 'object', properties: {} },
@@ -74,7 +85,7 @@ The user has described a problem. Investigate it systematically using the availa
 
 Rules:
 - Use only the tools needed for this specific problem — do not collect everything blindly.
-- For container-related issues, always check both syslog and the specific container's logs.
+- For container-related issues, always check both syslog and the specific container's logs. Also call get_container_details for that container to see its mount paths, environment variables, ports, and image version — many container problems are caused by wrong paths, missing mounts, or misconfigured env vars rather than anything in the logs.
 - For performance issues, always check system stats.
 - For storage issues, always check array status and shares.
 - For cache pool issues, mover failures, or "cannot open cache/appdata" errors, also call get_share_cache_settings to see exactly which shares use the cache and with what policy (prefer/only/yes/no). This tells you whether shares are misconfigured.
@@ -160,6 +171,26 @@ async function executeTool(
       if (!fullId) return `Container "${requestedName}" not found. Available: ${[...containerMap.keys()].join(', ')}`;
       const logs = await getContainerLogs(serverUrl, apiKey, fullId);
       return logs.slice(-4000) || '(no logs)';
+    }
+    case 'get_container_details': {
+      try {
+        const all = await getContainerDetails(serverUrl, apiKey);
+        const requestedName = String(inp.name ?? '').toLowerCase();
+        if (requestedName) {
+          const match = all.find(c => c.name.toLowerCase().includes(requestedName));
+          if (!match) return `Container "${inp.name}" not found. Available: ${all.map(c => c.name).join(', ')}`;
+          return JSON.stringify(match, null, 2);
+        }
+        // No name given — return all containers (trimmed to avoid token overload)
+        return JSON.stringify(all.map(c => ({
+          name: c.name, state: c.state, image: c.image,
+          mounts: c.mounts, ports: c.ports, network_mode: c.network_mode,
+          env_count: c.env.length,
+          env_keys: c.env.map(e => e.split('=')[0]),
+        })), null, 2);
+      } catch (e) {
+        return `Container details unavailable: ${e instanceof Error ? e.message : String(e)}`;
+      }
     }
     case 'get_system_stats': {
       const s = await getStats(serverUrl, apiKey);

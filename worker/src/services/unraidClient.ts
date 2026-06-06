@@ -63,6 +63,34 @@ export interface UnraidPlugin {
   status: string;
 }
 
+export interface UnraidContainerMount {
+  type: string;        // "bind" | "volume" | "tmpfs"
+  source: string;      // host path or volume name
+  destination: string; // path inside container
+  mode: string;        // "rw" | "ro"
+  rw: boolean;
+}
+
+export interface UnraidContainerPort {
+  ip: string;
+  private_port: number;
+  public_port: number;
+  type: string;        // "tcp" | "udp"
+}
+
+export interface UnraidContainerDetails {
+  id: string;
+  name: string;
+  state: string;
+  status: string;
+  image: string;
+  ports: UnraidContainerPort[];
+  mounts: UnraidContainerMount[];
+  env: string[];
+  labels: Record<string, string>;
+  network_mode: string;
+}
+
 export interface UnraidUPS {
   model: string;
   status: string;
@@ -205,6 +233,76 @@ export async function getContainers(url: string, apiKey: string): Promise<Unraid
     cpu_pct: 0,
     mem_mb: 0,
   }));
+}
+
+interface RawDetailedContainer {
+  id: string;
+  names: string[];
+  state: string;
+  status: string;
+  image: string | null;
+  imageId: string | null;
+  ports: Array<{ ip: string | null; privatePort: number | null; publicPort: number | null; type: string | null }> | null;
+  mounts: Array<{ type: string | null; name: string | null; source: string | null; destination: string | null; driver: string | null; mode: string | null; rw: boolean | null; propagation: string | null }> | null;
+  env: string[] | null;
+  labels: Array<{ name: string; value: string }> | null;
+  networkSettings: { networks: Array<{ networkId: string | null; name: string | null; ipAddress: string | null; gateway: string | null }> | null } | null;
+}
+
+export async function getContainerDetails(url: string, apiKey: string): Promise<UnraidContainerDetails[]> {
+  const data = await gql(url, apiKey, `
+    query {
+      docker {
+        containers {
+          id
+          names
+          state
+          status
+          image
+          imageId
+          ports { ip privatePort publicPort type }
+          mounts { type name source destination driver mode rw propagation }
+          env
+          labels { name value }
+          networkSettings {
+            networks { networkId name ipAddress gateway }
+          }
+        }
+      }
+    }
+  `) as { docker: { containers: RawDetailedContainer[] } };
+
+  return data.docker.containers.map(c => {
+    const labelsArr = c.labels ?? [];
+    const labels: Record<string, string> = {};
+    for (const l of labelsArr) labels[l.name] = l.value;
+
+    const networkMode = c.networkSettings?.networks?.[0]?.name ?? 'unknown';
+
+    return {
+      id: c.id,
+      name: (c.names[0] ?? 'unknown').replace(/^\//, ''),
+      state: c.state.toLowerCase(),
+      status: c.status,
+      image: c.image ?? c.imageId ?? 'unknown',
+      ports: (c.ports ?? []).map(p => ({
+        ip: p.ip ?? '',
+        private_port: p.privatePort ?? 0,
+        public_port: p.publicPort ?? 0,
+        type: p.type ?? 'tcp',
+      })).filter(p => p.private_port > 0),
+      mounts: (c.mounts ?? []).map(m => ({
+        type: m.type ?? 'bind',
+        source: m.source ?? m.name ?? '',
+        destination: m.destination ?? '',
+        mode: m.mode ?? (m.rw ? 'rw' : 'ro'),
+        rw: m.rw ?? true,
+      })),
+      env: c.env ?? [],
+      labels,
+      network_mode: networkMode,
+    };
+  });
 }
 
 export async function getVMs(url: string, apiKey: string): Promise<UnraidVM[]> {
