@@ -309,6 +309,54 @@ detective.post('/investigate', async (c) => {
   return c.json({ ...result, id: saved?.id, created_at: saved?.created_at, problem });
 });
 
+detective.post('/chat', async (c) => {
+  const user = c.get('user');
+  const { finding, messages, investigation_context } = await c.req.json<{
+    finding: { issue: string; cause: string; fix: string };
+    messages: Array<{ role: string; content: string }>;
+    investigation_context?: string;
+  }>();
+
+  if (!messages?.length) return c.json({ error: 'Messages required.' }, 400);
+
+  const configRow = await c.env.DB.prepare('SELECT * FROM ai_configs WHERE user_id = ?')
+    .bind(user.id).first<AIConfig>();
+
+  if (!configRow) return c.json({ error: 'No AI provider configured — add one in Settings.' }, 400);
+  if (configRow.provider !== 'claude') return c.json({ error: 'AI Detective requires Claude. Switch your AI provider in Settings.' }, 400);
+
+  const aiApiKey = await decrypt(configRow.api_key, c.env);
+
+  const systemPrompt = [
+    'You are an expert Unraid system administrator helping the user resolve a specific issue.',
+    'Be concise and practical. Format responses clearly with numbered steps where appropriate.',
+    `\nIssue being addressed: ${finding.issue}`,
+    `Root cause: ${finding.cause}`,
+    investigation_context ? `\nOriginal investigation context:\n${investigation_context}` : '',
+  ].filter(Boolean).join('\n');
+
+  const res = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': aiApiKey,
+      'anthropic-version': '2023-06-01',
+    },
+    body: JSON.stringify({
+      model: configRow.default_model,
+      max_tokens: 1024,
+      system: systemPrompt,
+      messages,
+    }),
+  });
+
+  if (!res.ok) throw new Error(`Claude API error: ${res.status} ${await res.text()}`);
+  const data = await res.json() as { content: Array<{ type: string; text: string }> };
+  const answer = data.content.find(b => b.type === 'text')?.text ?? '';
+
+  return c.json({ answer });
+});
+
 detective.get('/history', async (c) => {
   const user = c.get('user');
   const rows = await c.env.DB.prepare(

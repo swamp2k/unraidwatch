@@ -229,3 +229,12 @@ label { display: block; margin-bottom: 6px; color: var(--text-muted); font-size:
 .severity-critical { color: var(--danger); }
 
 pre { background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 16px; overflow-x: auto; font-size: 12px; line-height: 1.6; white-space: pre-wrap; word-break: break-word; }
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes slideInRight {
+  from { transform: translateX(100%); }
+  to { transform: translateX(0); }
+}
