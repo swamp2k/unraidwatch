@@ -29,7 +29,7 @@ async function createSession(env: Env, userId: string): Promise<string> {
 }
 
 function sessionCookie(token: string): string {
-  return `session=${token}; HttpOnly; Secure; SameSite=Lax; Max-Age=${SESSION_TTL}; Path=/`;
+  return `session=${token}; HttpOnly; Secure; SameSite=None; Max-Age=${SESSION_TTL}; Path=/`;
 }
 
 const auth = new Hono<{ Bindings: Env; Variables: { user: User } }>();
@@ -78,7 +78,7 @@ auth.post('/logout', authMiddleware, async (c) => {
   const cookie = c.req.header('Cookie') ?? '';
   const match = cookie.match(/session=([^;]+)/);
   if (match) await c.env.SESSIONS.delete(`sessions:${match[1]}`);
-  c.res.headers.set('Set-Cookie', 'session=; HttpOnly; Secure; SameSite=Lax; Max-Age=0; Path=/');
+  c.res.headers.set('Set-Cookie', 'session=; HttpOnly; Secure; SameSite=None; Max-Age=0; Path=/');
   return c.json({ ok: true });
 });
 
