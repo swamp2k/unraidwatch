@@ -122,11 +122,12 @@ async function callClaude(
   model: string,
   messages: Array<{ role: string; content: unknown }>,
   withTools = true,
+  systemPrompt: string = SYSTEM_PROMPT,
 ): Promise<ClaudeResponse> {
   const body: Record<string, unknown> = {
     model,
     max_tokens: 4096,
-    system: SYSTEM_PROMPT,
+    system: systemPrompt,
     messages,
   };
   if (withTools) body['tools'] = TOOLS;
@@ -373,50 +374,90 @@ detective.post('/investigate', async (c) => {
 
 detective.post('/chat', async (c) => {
   const user = c.get('user');
-  const { finding, messages, investigation_context } = await c.req.json<{
+  const { finding, messages, investigation_id } = await c.req.json<{
     finding: { issue: string; cause: string; fix: string };
     messages: Array<{ role: string; content: string }>;
-    investigation_context?: string;
+    investigation_id: string;
   }>();
 
   if (!messages?.length) return c.json({ error: 'Messages required.' }, 400);
 
-  const configRow = await c.env.DB.prepare('SELECT * FROM ai_configs WHERE user_id = ?')
-    .bind(user.id).first<AIConfig>();
+  const [configRow, serverRow, invRow] = await Promise.all([
+    c.env.DB.prepare('SELECT * FROM ai_configs WHERE user_id = ?')
+      .bind(user.id).first<AIConfig>(),
+    c.env.DB.prepare('SELECT url, api_key FROM servers WHERE user_id = ?')
+      .bind(user.id).first<{ url: string; api_key: string }>(),
+    investigation_id
+      ? c.env.DB.prepare('SELECT problem, summary, root_cause, evidence FROM detective_investigations WHERE id = ? AND user_id = ?')
+          .bind(investigation_id, user.id).first<{ problem: string; summary: string; root_cause: string; evidence: string }>()
+      : Promise.resolve(null),
+  ]);
 
   if (!configRow) return c.json({ error: 'No AI provider configured — add one in Settings.' }, 400);
   if (configRow.provider !== 'claude') return c.json({ error: 'AI Detective requires Claude. Switch your AI provider in Settings.' }, 400);
 
   const aiApiKey = await decrypt(configRow.api_key, c.env);
+  const serverApiKey = serverRow ? await decrypt(serverRow.api_key, c.env) : null;
+  const hasLiveAccess = !!(serverRow && serverApiKey);
 
-  const systemPrompt = [
-    'You are an expert Unraid system administrator helping the user resolve a specific issue.',
-    'Be concise and practical. Format responses clearly with numbered steps where appropriate.',
-    `\nIssue being addressed: ${finding.issue}`,
-    `Root cause: ${finding.cause}`,
-    investigation_context ? `\nOriginal investigation context:\n${investigation_context}` : '',
+  const evidence: string[] = invRow ? JSON.parse(invRow.evidence) as string[] : [];
+
+  const chatSystemPrompt = [
+    'You are an expert Unraid system administrator helping a user resolve a specific issue found during an automated investigation.',
+    'You have access to live tools that can query the Unraid server directly.',
+    'When the user asks you to re-check, verify a fix, or get current system state — USE THE TOOLS. Do not tell the user to check something themselves if you can check it directly.',
+    'Be concise and practical. Use numbered steps for procedures.',
+    '',
+    `Issue: ${finding.issue}`,
+    `Cause: ${finding.cause}`,
+    `Suggested fix: ${finding.fix}`,
+    invRow ? `\nOriginal problem: ${invRow.problem}` : '',
+    invRow ? `Investigation summary: ${invRow.summary}` : '',
+    invRow ? `Root cause: ${invRow.root_cause}` : '',
+    evidence.length
+      ? `\nKey evidence from the original investigation:\n${evidence.map(e => `- ${e}`).join('\n')}`
+      : '',
   ].filter(Boolean).join('\n');
 
-  const res = await fetch('https://api.anthropic.com/v1/messages', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'x-api-key': aiApiKey,
-      'anthropic-version': '2023-06-01',
-    },
-    body: JSON.stringify({
-      model: configRow.default_model,
-      max_tokens: 1024,
-      system: systemPrompt,
-      messages,
-    }),
-  });
+  // Build container map for tool execution (non-fatal if unavailable)
+  let containerMap = new Map<string, string>();
+  if (hasLiveAccess) {
+    try {
+      const containers = await getContainers(serverRow!.url, serverApiKey!);
+      containerMap = new Map(containers.map(ct => [ct.name, ct.id]));
+    } catch { /* container map unavailable — tools will report not found */ }
+  }
 
-  if (!res.ok) throw new Error(`Claude API error: ${res.status} ${await res.text()}`);
-  const data = await res.json() as { content: Array<{ type: string; text: string }> };
-  const answer = data.content.find(b => b.type === 'text')?.text ?? '';
+  const chatMessages: Array<{ role: string; content: unknown }> = [...messages];
 
-  return c.json({ answer });
+  const MAX_CHAT_ROUNDS = 2;
+  let response = await callClaude(aiApiKey, configRow.default_model, chatMessages, hasLiveAccess, chatSystemPrompt);
+
+  for (let round = 0; round < MAX_CHAT_ROUNDS && response.stop_reason === 'tool_use'; round++) {
+    const toolCalls = response.content.filter(
+      (b): b is Extract<ClaudeContentBlock, { type: 'tool_use' }> => b.type === 'tool_use',
+    );
+
+    const toolResults = await Promise.all(
+      toolCalls.map(async (call) => ({
+        type: 'tool_result' as const,
+        tool_use_id: call.id,
+        content: await executeTool(call.name, call.input, serverRow!.url, serverApiKey!, containerMap)
+          .catch((e: unknown) => `Tool error: ${e instanceof Error ? e.message : String(e)}`),
+      })),
+    );
+
+    chatMessages.push({ role: 'assistant', content: response.content });
+    chatMessages.push({ role: 'user', content: toolResults });
+    response = await callClaude(aiApiKey, configRow.default_model, chatMessages, hasLiveAccess, chatSystemPrompt);
+  }
+
+  const answer = response.content
+    .filter((b): b is Extract<ClaudeContentBlock, { type: 'text' }> => b.type === 'text')
+    .map(b => b.text)
+    .join('');
+
+  return c.json({ answer: answer || 'No response.' });
 });
 
 detective.get('/history', async (c) => {

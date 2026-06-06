@@ -60,13 +60,13 @@ function saveChecked(invId: string, checked: Set<number>) {
 // ── Finding overlay (drawer) ──────────────────────────────────────────────────
 
 function FindingOverlay({
-  finding, findingIndex, totalFindings, investigationContext,
+  finding, findingIndex, totalFindings, investigationId,
   resolved, onToggleResolved, onNavigate, onClose,
 }: {
   finding: Finding;
   findingIndex: number;
   totalFindings: number;
-  investigationContext: string;
+  investigationId: string;
   resolved: boolean;
   onToggleResolved: () => void;
   onNavigate: (delta: -1 | 1) => void;
@@ -111,7 +111,7 @@ function FindingOverlay({
       const { answer } = await api.post<{ answer: string }>('/api/detective/chat', {
         finding,
         messages: next,
-        investigation_context: investigationContext,
+        investigation_id: investigationId,
       });
       setMessages(m => [...m, { role: 'assistant', content: answer }]);
     } catch (e) {
@@ -212,7 +212,7 @@ function FindingOverlay({
             </div>
           ))}
           {sending && (
-            <div style={{ color: 'var(--text-muted)', fontSize: 12, paddingLeft: 2 }}>Thinking…</div>
+            <div style={{ color: 'var(--text-muted)', fontSize: 12, paddingLeft: 2 }}>Checking live system…</div>
           )}
           <div ref={bottomRef} />
         </div>
@@ -478,10 +478,6 @@ export function Detective() {
 
   const loading = investigate.isPending;
 
-  const investigationContext = activeInv
-    ? `Problem: ${activeInv.problem}\nSummary: ${activeInv.summary}\nRoot cause: ${activeInv.root_cause}`
-    : '';
-
   return (
     <>
       <TopBar title="AI Detective" />
@@ -585,7 +581,7 @@ export function Detective() {
           finding={activeInv.findings[overlayIndex]}
           findingIndex={overlayIndex}
           totalFindings={activeInv.findings.length}
-          investigationContext={investigationContext}
+          investigationId={activeInv.id}
           resolved={getChecked(activeInv.id).has(overlayIndex)}
           onToggleResolved={() => toggleCheck(activeInv.id, overlayIndex)}
           onNavigate={delta => setOverlayIndex(i => i !== null ? i + delta : null)}
