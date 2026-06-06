@@ -149,7 +149,14 @@ async function executeTool(
     }
     case 'get_system_stats': {
       const s = await getStats(serverUrl, apiKey);
-      return JSON.stringify(s, null, 2);
+      return JSON.stringify({
+        cpu_percent: s.cpu_pct,
+        ram_used_gb: s.ram_used_gb,
+        ram_total_gb: s.ram_total_gb,
+        ram_used_percent: s.ram_pct,
+        temp_avg_celsius: s.temp_avg,
+        uptime_hours: Math.round(s.uptime_s / 3600),
+      }, null, 2);
     }
     case 'get_array_status': {
       const a = await getArray(serverUrl, apiKey);
