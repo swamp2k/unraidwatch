@@ -13,6 +13,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
+        env:
+          FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
       - run: cd worker && npm ci
       - name: Apply D1 migrations (remote)
         run: cd worker && npx wrangler d1 migrations apply unraidwatch --remote
