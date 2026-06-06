@@ -13,17 +13,31 @@ function ServerConfig() {
   const [url, setUrl] = useState('');
   const [apiKey, setApiKey] = useState('');
   const [msg, setMsg] = useState('');
+  const [msgOk, setMsgOk] = useState(true);
   const [testing, setTesting] = useState(false);
 
   useEffect(() => {
     if (data) { setLabel(data.label); setUrl(data.url); }
   }, [data]);
 
-  const save = useMutation({ mutationFn: () => api.put('/api/server', { label, url, api_key: apiKey }), onSuccess: () => setMsg('Saved.') });
+  function ok(s: string)  { setMsg(s); setMsgOk(true); }
+  function err(s: string) { setMsg(s); setMsgOk(false); }
+
+  const save = useMutation({
+    mutationFn: () => {
+      if (!url.trim())    throw new Error('URL is required.');
+      if (!apiKey.trim()) throw new Error('API Key is required.');
+      return api.put('/api/server', { label, url: url.trim(), api_key: apiKey.trim() });
+    },
+    onSuccess: () => ok('Saved.'),
+    onError:   (e) => err(e instanceof Error ? e.message : 'Save failed.'),
+  });
 
   async function testConn() {
     setTesting(true);
-    try { await api.post('/api/server/test'); setMsg('Connection successful!'); } catch (e) { setMsg(`Failed: ${e instanceof Error ? e.message : 'unknown'}`); } finally { setTesting(false); }
+    try { await api.post('/api/server/test'); ok('Connection successful!'); }
+    catch (e) { err(e instanceof Error ? e.message : 'unknown'); }
+    finally { setTesting(false); }
   }
 
   return (
@@ -31,12 +45,12 @@ function ServerConfig() {
       <h3 style={{ fontWeight: 600, marginBottom: 16 }}>Unraid Server</h3>
       <form onSubmit={(e: FormEvent) => { e.preventDefault(); save.mutate(); }}>
         <div className="form-row"><label>Label</label><input value={label} onChange={e => setLabel(e.target.value)} /></div>
-        <div className="form-row"><label>URL</label><input value={url} onChange={e => setUrl(e.target.value)} placeholder="https://tower.local" /></div>
-        <div className="form-row"><label>API Key</label><input type="password" value={apiKey} onChange={e => setApiKey(e.target.value)} placeholder={data?.verified_at ? '(saved — paste new to update)' : ''} /></div>
-        {msg && <p style={{ color: 'var(--success)', fontSize: 13, marginBottom: 8 }}>{msg}</p>}
+        <div className="form-row"><label>URL</label><input value={url} onChange={e => setUrl(e.target.value)} placeholder="https://unraid-api.jeppesen.cc" /></div>
+        <div className="form-row"><label>API Key</label><input type="password" value={apiKey} onChange={e => setApiKey(e.target.value)} placeholder={data ? '(saved — paste new to update)' : 'Paste API key'} /></div>
+        {msg && <p style={{ color: msgOk ? 'var(--success)' : 'var(--danger)', fontSize: 13, marginBottom: 8 }}>{msg}</p>}
         <div className="form-actions">
           <button type="button" className="btn-ghost" onClick={() => void testConn()} disabled={testing}>{testing ? 'Testing…' : 'Test connection'}</button>
-          <button type="submit" className="btn-primary">Save</button>
+          <button type="submit" className="btn-primary" disabled={save.isPending}>{save.isPending ? 'Saving…' : 'Save'}</button>
         </div>
       </form>
     </div>
