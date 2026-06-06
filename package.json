@@ -1,0 +1,12 @@
+{
+  "name": "unraidwatch",
+  "private": true,
+  "workspaces": ["frontend", "worker"],
+  "scripts": {
+    "dev:worker": "cd worker && npm run dev",
+    "dev:frontend": "cd frontend && npm run dev",
+    "build:frontend": "cd frontend && npm run build",
+    "deploy:worker": "cd worker && npm run deploy",
+    "deploy:frontend": "cd frontend && npm run deploy"
+  }
+}

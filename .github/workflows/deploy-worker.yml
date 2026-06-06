@@ -1,0 +1,25 @@
+name: Deploy Worker
+on:
+  push:
+    branches: [main]
+    paths: ['worker/**', 'migrations/**']
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: cd worker && npm ci
+      - name: Apply D1 migrations (remote)
+        run: cd worker && npx wrangler d1 migrations apply unraidwatch --remote
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+      - name: Deploy worker
+        run: cd worker && npx wrangler deploy
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
