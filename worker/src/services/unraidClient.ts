@@ -47,6 +47,22 @@ export interface UnraidShare {
   pct: number;
 }
 
+export interface UnraidShareConfig {
+  name: string;
+  use_cache: string;       // "yes" | "no" | "only" | "prefer"
+  allocator: string;
+  split_level: number | null;
+  include: string;
+  exclude: string;
+  cache_floor: string;
+}
+
+export interface UnraidPlugin {
+  name: string;
+  version: string;
+  status: string;
+}
+
 export interface UnraidUPS {
   model: string;
   status: string;
@@ -350,4 +366,62 @@ export async function getContainerLogs(url: string, apiKey: string, containerId:
     query { docker { logs(id: "${containerId}", tail: 500) { lines { message } } } }
   `) as { docker: { logs: { lines: Array<{ message: string }> } } };
   return data.docker.logs.lines.map(l => l.message).join('\n');
+}
+
+export async function getShareConfigs(url: string, apiKey: string): Promise<UnraidShareConfig[]> {
+  const data = await gql(url, apiKey, `
+    query {
+      shares {
+        name
+        useCache
+        allocator
+        splitLevel
+        include
+        exclude
+        cacheFloor
+      }
+    }
+  `) as {
+    shares: Array<{
+      name: string;
+      useCache: string | null;
+      allocator: string | null;
+      splitLevel: number | null;
+      include: string | null;
+      exclude: string | null;
+      cacheFloor: string | null;
+    }>;
+  };
+
+  return data.shares
+    .filter(s => s.name)
+    .map(s => ({
+      name: s.name,
+      use_cache: s.useCache ?? 'unknown',
+      allocator: s.allocator ?? 'unknown',
+      split_level: s.splitLevel ?? null,
+      include: s.include ?? '',
+      exclude: s.exclude ?? '',
+      cache_floor: s.cacheFloor ?? '',
+    }));
+}
+
+export async function getPlugins(url: string, apiKey: string): Promise<UnraidPlugin[]> {
+  const data = await gql(url, apiKey, `
+    query {
+      plugins {
+        name
+        version
+        status
+      }
+    }
+  `) as {
+    plugins: Array<{ name: string; version: string | null; status: string | null }>;
+  };
+
+  return data.plugins.map(p => ({
+    name: p.name,
+    version: p.version ?? 'unknown',
+    status: p.status ?? 'unknown',
+  }));
 }

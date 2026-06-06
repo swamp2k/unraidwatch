@@ -4,6 +4,7 @@ import { authMiddleware } from '../middleware/auth';
 import { decrypt } from '../services/encryption';
 import {
   getStats, getContainers, getArray, getShares, getSyslog, getContainerLogs,
+  getShareConfigs, getPlugins,
 } from '../services/unraidClient';
 import { filterSyslogByHours } from './ai';
 
@@ -56,6 +57,16 @@ const TOOLS = [
     description: 'Get share names and disk usage. Use when the problem may involve storage space.',
     input_schema: { type: 'object', properties: {} },
   },
+  {
+    name: 'get_share_cache_settings',
+    description: 'Get per-share cache configuration from Unraid: which shares use the cache pool and with what policy (yes/no/only/prefer). Use for mover failures, cache/appdata errors, or any issue involving the cache pool.',
+    input_schema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'get_plugins',
+    description: 'Get the list of installed Unraid plugins and their status. Use to check whether a specific plugin (e.g. Mover Tuning, CA Backup, Fix Common Problems) is installed or may be contributing to the issue.',
+    input_schema: { type: 'object', properties: {} },
+  },
 ] as const;
 
 const SYSTEM_PROMPT = `You are an expert Unraid system administrator performing root-cause analysis.
@@ -66,8 +77,11 @@ Rules:
 - For container-related issues, always check both syslog and the specific container's logs.
 - For performance issues, always check system stats.
 - For storage issues, always check array status and shares.
+- For cache pool issues, mover failures, or "cannot open cache/appdata" errors, also call get_share_cache_settings to see exactly which shares use the cache and with what policy (prefer/only/yes/no). This tells you whether shares are misconfigured.
+- If a plugin (e.g. Mover Tuning, CA Backup, Fix Common Problems) may be relevant, call get_plugins to verify it is installed and its status.
 - Collect 1–4 hours of syslog unless the problem is intermittent (then use more).
 - You may make multiple rounds of tool calls if initial data points to something needing deeper inspection.
+- When you have live data from the API, use it directly in your fix steps — do not tell the user to "go check" something you can already see.
 
 After collecting enough data, respond ONLY with a valid JSON object in this exact shape:
 {
@@ -165,6 +179,23 @@ async function executeTool(
     case 'get_shares': {
       const sh = await getShares(serverUrl, apiKey);
       return JSON.stringify(sh, null, 2);
+    }
+    case 'get_share_cache_settings': {
+      try {
+        const configs = await getShareConfigs(serverUrl, apiKey);
+        return JSON.stringify(configs, null, 2);
+      } catch (e) {
+        return `Share cache settings unavailable (API may not support this query): ${e instanceof Error ? e.message : String(e)}`;
+      }
+    }
+    case 'get_plugins': {
+      try {
+        const plugins = await getPlugins(serverUrl, apiKey);
+        if (!plugins.length) return 'No plugins installed.';
+        return JSON.stringify(plugins, null, 2);
+      } catch (e) {
+        return `Plugin list unavailable (API may not support this query): ${e instanceof Error ? e.message : String(e)}`;
+      }
     }
     default:
       return `Unknown tool: ${name}`;
