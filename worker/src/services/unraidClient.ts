@@ -328,24 +328,25 @@ export function startContainerStatsWs(
 }
 
 export async function introspectMutations(url: string, apiKey: string): Promise<unknown> {
-  return gql(url, apiKey, `{
+  // Unwrap NON_NULL via ofType so we can see actual object fields
+  const data = await gql(url, apiKey, `{
     __schema {
       mutationType {
         fields {
           name
           type {
-            name
-            kind
-            fields {
-              name
-              args { name type { name kind ofType { name kind } } }
-              type { name kind ofType { name kind } }
-            }
+            name kind
+            ofType { name kind fields { name args { name type { name kind ofType { name kind } } } } }
+            fields { name args { name type { name kind ofType { name kind } } } }
           }
         }
       }
     }
-  }`);
+  }`) as { __schema: { mutationType: { fields: Array<{ name: string; type: { name: string | null; kind: string; fields: unknown[] | null; ofType: { name: string | null; kind: string; fields: unknown[] | null } | null } }> } } };
+
+  // Return only the docker entry to keep the response small
+  const dockerField = data.__schema.mutationType.fields.find(f => f.name === 'docker');
+  return { docker: dockerField };
 }
 
 export async function containerAction(url: string, apiKey: string, id: string, action: 'start' | 'stop' | 'restart'): Promise<void> {
