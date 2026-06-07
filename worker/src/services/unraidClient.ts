@@ -73,8 +73,7 @@ async function gql(url: string, apiKey: string, query: string): Promise<unknown>
   }
   if (!res.ok) throw new Error(`Unraid API returned HTTP ${res.status}. Check that your API key is correct.`);
   const json = await res.json() as { data?: unknown; errors?: Array<{ message: string }> };
-  // Surface only the first error (ignore partial-data errors for optional fields)
-  if (json.errors?.length && !json.data) {
+  if (json.errors?.length) {
     throw new Error(json.errors[0]?.message ?? 'GraphQL error');
   }
   return json.data;

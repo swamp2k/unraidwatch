@@ -44,6 +44,7 @@ export function Docker() {
   const [runningOnly, setRunningOnly] = useState(false);
   const [logs, setLogs] = useState<{ name: string; text: string } | null>(null);
   const [actioning, setActioning] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
   const [logsLoading, setLogsLoading] = useState<string | null>(null);
 
   function setSort(field: SortField) {
@@ -67,8 +68,14 @@ export function Docker() {
 
   async function doAction(id: string, act: 'start' | 'stop' | 'restart') {
     setActioning(`${id}-${act}`);
-    try { await api.post(`/api/unraid/docker/${encodeURIComponent(id)}/${act}`); }
-    finally { setActioning(null); }
+    setActionError(null);
+    try {
+      await api.post(`/api/unraid/docker/${encodeURIComponent(id)}/${act}`);
+    } catch (e) {
+      setActionError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setActioning(null);
+    }
   }
 
   async function viewLogs(id: string, name: string) {
@@ -111,6 +118,12 @@ export function Docker() {
               </button>
             </div>
             <pre style={{ maxHeight: 420, overflowY: 'auto', fontSize: 11 }}>{logs.text}</pre>
+          </div>
+        )}
+
+        {actionError && (
+          <div className="card mb-4" style={{ borderColor: 'var(--danger)', color: 'var(--danger)', fontSize: 13 }}>
+            <strong>Action failed:</strong> {actionError}
           </div>
         )}
 
