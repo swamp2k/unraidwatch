@@ -333,8 +333,15 @@ export async function introspectMutations(url: string, apiKey: string): Promise<
       mutationType {
         fields {
           name
-          args { name type { name kind ofType { name kind } } }
-          type { name kind }
+          type {
+            name
+            kind
+            fields {
+              name
+              args { name type { name kind ofType { name kind } } }
+              type { name kind ofType { name kind } }
+            }
+          }
         }
       }
     }
