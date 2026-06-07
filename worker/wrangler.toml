@@ -19,6 +19,7 @@ APP_URL = "https://unraidwatch.pages.dev"
 
 [triggers]
 crons = [
+  "* * * * *",
   "0 * * * *",
   "0 7 * * *"
 ]

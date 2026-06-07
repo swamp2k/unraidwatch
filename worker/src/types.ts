@@ -80,7 +80,9 @@ export interface DockerMonitor {
   notify_record: number;
   notify_action: number;
   action_type: 'start' | 'stop' | 'restart' | null;
+  check_interval_s: number;
   cooldown_s: number;
+  last_checked_at: number | null;
   last_fired_at: number | null;
   last_status: string | null;
   created_at: number;
@@ -101,7 +103,9 @@ export interface LogMonitor {
   action_container_id: string | null;
   action_type: 'start' | 'stop' | 'restart' | null;
   cursor: string | null;
+  check_interval_s: number;
   cooldown_s: number;
+  last_checked_at: number | null;
   last_fired_at: number | null;
   created_at: number;
 }

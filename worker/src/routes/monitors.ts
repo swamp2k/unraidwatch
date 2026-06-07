@@ -37,20 +37,22 @@ monitors.post('/docker', async (c) => {
     notify_record?: number;
     notify_action?: number;
     action_type?: string | null;
+    check_interval_s?: number;
     cooldown_s?: number;
   }>();
 
   await c.env.DB.prepare(
     `INSERT INTO docker_monitors
-       (user_id, container_id, container_name, notify_email, notify_record, notify_action, action_type, cooldown_s)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+       (user_id, container_id, container_name, notify_email, notify_record, notify_action, action_type, check_interval_s, cooldown_s)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT (user_id, container_id) DO UPDATE SET
-       container_name = excluded.container_name,
-       notify_email   = excluded.notify_email,
-       notify_record  = excluded.notify_record,
-       notify_action  = excluded.notify_action,
-       action_type    = excluded.action_type,
-       cooldown_s     = excluded.cooldown_s`
+       container_name    = excluded.container_name,
+       notify_email      = excluded.notify_email,
+       notify_record     = excluded.notify_record,
+       notify_action     = excluded.notify_action,
+       action_type       = excluded.action_type,
+       check_interval_s  = excluded.check_interval_s,
+       cooldown_s        = excluded.cooldown_s`
   ).bind(
     user.id,
     body.container_id,
@@ -59,6 +61,7 @@ monitors.post('/docker', async (c) => {
     body.notify_record ?? 1,
     body.notify_action ?? 0,
     body.action_type ?? null,
+    body.check_interval_s ?? 3600,
     body.cooldown_s ?? 3600,
   ).run();
 
@@ -70,12 +73,13 @@ monitors.put('/docker/:id', async (c) => {
   const body = await c.req.json<Partial<DockerMonitor>>();
   await c.env.DB.prepare(
     `UPDATE docker_monitors SET
-       enabled      = COALESCE(?, enabled),
-       notify_email = COALESCE(?, notify_email),
-       notify_record= COALESCE(?, notify_record),
-       notify_action= COALESCE(?, notify_action),
-       action_type  = COALESCE(?, action_type),
-       cooldown_s   = COALESCE(?, cooldown_s)
+       enabled           = COALESCE(?, enabled),
+       notify_email      = COALESCE(?, notify_email),
+       notify_record     = COALESCE(?, notify_record),
+       notify_action     = COALESCE(?, notify_action),
+       action_type       = COALESCE(?, action_type),
+       check_interval_s  = COALESCE(?, check_interval_s),
+       cooldown_s        = COALESCE(?, cooldown_s)
      WHERE id = ? AND user_id = ?`
   ).bind(
     body.enabled ?? null,
@@ -83,6 +87,7 @@ monitors.put('/docker/:id', async (c) => {
     body.notify_record ?? null,
     body.notify_action ?? null,
     body.action_type ?? null,
+    body.check_interval_s ?? null,
     body.cooldown_s ?? null,
     c.req.param('id'),
     user.id,
@@ -120,6 +125,7 @@ monitors.post('/log', async (c) => {
     notify_action?: number;
     action_container_id?: string | null;
     action_type?: string | null;
+    check_interval_s?: number;
     cooldown_s?: number;
   }>();
 
@@ -131,8 +137,8 @@ monitors.post('/log', async (c) => {
   await c.env.DB.prepare(
     `INSERT INTO log_monitors
        (user_id, name, source_type, source_id, source_label, keywords,
-        notify_email, notify_record, notify_action, action_container_id, action_type, cooldown_s)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        notify_email, notify_record, notify_action, action_container_id, action_type, check_interval_s, cooldown_s)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).bind(
     user.id,
     body.name.trim(),
@@ -145,6 +151,7 @@ monitors.post('/log', async (c) => {
     body.notify_action ?? 0,
     body.action_container_id ?? null,
     body.action_type ?? null,
+    body.check_interval_s ?? 3600,
     body.cooldown_s ?? 3600,
   ).run();
 
@@ -170,6 +177,7 @@ monitors.put('/log/:id', async (c) => {
        notify_action       = COALESCE(?, notify_action),
        action_container_id = COALESCE(?, action_container_id),
        action_type         = COALESCE(?, action_type),
+       check_interval_s    = COALESCE(?, check_interval_s),
        cooldown_s          = COALESCE(?, cooldown_s)
      WHERE id = ? AND user_id = ?`
   ).bind(
@@ -184,6 +192,7 @@ monitors.put('/log/:id', async (c) => {
     body.notify_action ?? null,
     body.action_container_id ?? null,
     body.action_type ?? null,
+    body.check_interval_s ?? null,
     body.cooldown_s ?? null,
     c.req.param('id'),
     user.id,

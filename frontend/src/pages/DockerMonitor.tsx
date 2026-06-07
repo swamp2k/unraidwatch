@@ -6,6 +6,14 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { formatDate } from '../lib/format';
 import { Trash2, Plus, Activity, Mail, Database, Play, Power } from 'lucide-react';
 
+const CHECK_INTERVALS = [
+  { label: 'Every 1 minute',  value: 60 },
+  { label: 'Every 5 minutes', value: 300 },
+  { label: 'Every 15 minutes', value: 900 },
+  { label: 'Every 30 minutes', value: 1800 },
+  { label: 'Every hour',      value: 3600 },
+];
+
 interface DockerMonitor {
   id: string;
   container_id: string;
@@ -15,6 +23,7 @@ interface DockerMonitor {
   notify_record: number;
   notify_action: number;
   action_type: string | null;
+  check_interval_s: number;
   cooldown_s: number;
   last_fired_at: number | null;
   last_status: string | null;
@@ -39,6 +48,7 @@ export function DockerMonitor() {
   const [notifyRecord, setNotifyRecord] = useState(true);
   const [notifyAction, setNotifyAction] = useState(false);
   const [actionType, setActionType] = useState<'start' | 'stop' | 'restart'>('start');
+  const [checkInterval, setCheckInterval] = useState(3600);
   const [cooldownMin, setCooldownMin] = useState(60);
 
   const { data: monitors = [] } = useQuery<DockerMonitor[]>({
@@ -62,6 +72,7 @@ export function DockerMonitor() {
         notify_record: notifyRecord ? 1 : 0,
         notify_action: notifyAction ? 1 : 0,
         action_type: notifyAction ? actionType : null,
+        check_interval_s: checkInterval,
         cooldown_s: cooldownMin * 60,
       });
     },
@@ -131,7 +142,15 @@ export function DockerMonitor() {
                   </select>
                 </div>
                 <div className="form-row">
-                  <label>Cooldown</label>
+                  <label>Check every</label>
+                  <select value={checkInterval} onChange={e => setCheckInterval(parseInt(e.target.value))}>
+                    {CHECK_INTERVALS.map(o => (
+                      <option key={o.value} value={o.value}>{o.label}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="form-row">
+                  <label>Cooldown (min between alerts)</label>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                     <input
                       type="number"
@@ -192,8 +211,8 @@ export function DockerMonitor() {
                   <th>Container</th>
                   <th>Status</th>
                   <th>Notifications</th>
+                  <th>Check every</th>
                   <th>Last fired</th>
-                  <th>Cooldown</th>
                   <th></th>
                 </tr>
               </thead>
@@ -219,10 +238,10 @@ export function DockerMonitor() {
                       </div>
                     </td>
                     <td style={{ color: 'var(--text-muted)', fontSize: 12 }}>
-                      {m.last_fired_at ? formatDate(m.last_fired_at) : '—'}
+                      {CHECK_INTERVALS.find(o => o.value === m.check_interval_s)?.label ?? `${m.check_interval_s / 60}m`}
                     </td>
                     <td style={{ color: 'var(--text-muted)', fontSize: 12 }}>
-                      {m.cooldown_s / 60}m
+                      {m.last_fired_at ? formatDate(m.last_fired_at) : '—'}
                     </td>
                     <td>
                       <div style={{ display: 'flex', gap: 4 }}>

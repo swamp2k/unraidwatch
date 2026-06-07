@@ -37,10 +37,8 @@ app.get('/api/health', (c) => c.json({ ok: true }));
 export default {
   fetch: app.fetch,
 
-  async scheduled(_event: ScheduledEvent, env: Env, ctx: ExecutionContext) {
-    const hour = new Date().getUTCHours();
-
-    const users = await env.DB.prepare(
+  async scheduled(event: ScheduledEvent, env: Env, ctx: ExecutionContext) {
+    const usersQuery = env.DB.prepare(
       `SELECT u.id, u.email, s.url, s.api_key,
               COALESCE(n.email_alerts, 1) as email_alerts,
               COALESCE(n.push_alerts, 0) as push_alerts,
@@ -48,16 +46,30 @@ export default {
        FROM users u
        JOIN servers s ON s.user_id = u.id
        LEFT JOIN notification_prefs n ON n.user_id = u.id`
-    ).all<{ id: string; email: string; url: string; api_key: string; email_alerts: number; push_alerts: number; alert_min_severity: string }>();
+    );
 
-    for (const user of users.results) {
-      ctx.waitUntil(evaluateAlerts(user, env));
-      ctx.waitUntil(evaluateDockerMonitors(user, env));
-      ctx.waitUntil(evaluateLogMonitors(user, env));
+    // Per-minute: run docker + log monitors (each monitor decides internally if it's due)
+    if (event.cron === '* * * * *') {
+      const users = await usersQuery.all<{ id: string; email: string; url: string; api_key: string; email_alerts: number; push_alerts: number; alert_min_severity: string }>();
+      for (const user of users.results) {
+        ctx.waitUntil(evaluateDockerMonitors(user, env));
+        ctx.waitUntil(evaluateLogMonitors(user, env));
+      }
+      return;
+    }
+
+    // Hourly: run metric-based alert rules
+    if (event.cron === '0 * * * *') {
+      const users = await usersQuery.all<{ id: string; email: string; url: string; api_key: string; email_alerts: number; push_alerts: number; alert_min_severity: string }>();
+      for (const user of users.results) {
+        ctx.waitUntil(evaluateAlerts(user, env));
+      }
+      return;
     }
 
     // Daily briefing
-    if (hour !== undefined) {
+    if (event.cron === '0 7 * * *') {
+      const hour = new Date().getUTCHours();
       const briefingUsers = await env.DB.prepare(
         `SELECT bs.user_id, u.email, bs.deliver_via
          FROM briefing_schedules bs
@@ -66,7 +78,6 @@ export default {
       ).bind(hour).all<{ user_id: string; email: string; deliver_via: string }>();
 
       for (const u of briefingUsers.results) {
-        // Briefing logic would call AI analysis of syslog and email the result
         console.log(`Daily briefing scheduled for ${u.email}`);
       }
     }

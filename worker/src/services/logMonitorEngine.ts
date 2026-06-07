@@ -22,6 +22,11 @@ export async function evaluateLogMonitors(user: UserRow, env: Env): Promise<void
     const updates: D1PreparedStatement[] = [];
 
     for (const monitor of monitors.results) {
+      // Skip if not due for a check yet
+      const isDue = monitor.last_checked_at === null ||
+        (now - monitor.last_checked_at) >= monitor.check_interval_s;
+      if (!isDue) continue;
+
       let newLines: string[] = [];
       let newCursor = monitor.cursor;
 
@@ -44,10 +49,10 @@ export async function evaluateLogMonitors(user: UserRow, env: Env): Promise<void
         newCursor = String(allLines.length);
       }
 
-      // Always update cursor so we don't re-scan old lines
+      // Always update cursor + last_checked_at so we don't re-scan old lines
       updates.push(
-        env.DB.prepare('UPDATE log_monitors SET cursor = ? WHERE id = ?')
-          .bind(newCursor, monitor.id)
+        env.DB.prepare('UPDATE log_monitors SET cursor = ?, last_checked_at = ? WHERE id = ?')
+          .bind(newCursor, now, monitor.id)
       );
 
       if (newLines.length === 0) continue;

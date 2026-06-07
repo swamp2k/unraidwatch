@@ -17,6 +17,17 @@ export async function evaluateDockerMonitors(user: UserRow, env: Env): Promise<v
     const updates: D1PreparedStatement[] = [];
 
     for (const monitor of monitors.results) {
+      // Skip if not due for a check yet
+      const isDue = monitor.last_checked_at === null ||
+        (now - monitor.last_checked_at) >= monitor.check_interval_s;
+      if (!isDue) continue;
+
+      // Mark as checked regardless of outcome
+      updates.push(
+        env.DB.prepare('UPDATE docker_monitors SET last_checked_at = ? WHERE id = ?')
+          .bind(now, monitor.id)
+      );
+
       const currentStatus = statusMap.get(monitor.container_id) ?? 'not_found';
 
       if (currentStatus === 'running') {

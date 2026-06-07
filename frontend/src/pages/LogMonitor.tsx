@@ -6,6 +6,14 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { formatDate } from '../lib/format';
 import { Trash2, Plus, ScrollText, Mail, Database, Play, X } from 'lucide-react';
 
+const CHECK_INTERVALS = [
+  { label: 'Every 1 minute',   value: 60 },
+  { label: 'Every 5 minutes',  value: 300 },
+  { label: 'Every 15 minutes', value: 900 },
+  { label: 'Every 30 minutes', value: 1800 },
+  { label: 'Every hour',       value: 3600 },
+];
+
 interface LogMonitor {
   id: string;
   name: string;
@@ -19,6 +27,7 @@ interface LogMonitor {
   notify_action: number;
   action_container_id: string | null;
   action_type: string | null;
+  check_interval_s: number;
   cooldown_s: number;
   last_fired_at: number | null;
 }
@@ -49,6 +58,7 @@ export function LogMonitor() {
   const [notifyAction, setNotifyAction] = useState(false);
   const [actionContainerId, setActionContainerId] = useState('');
   const [actionType, setActionType] = useState<'start' | 'stop' | 'restart'>('restart');
+  const [checkInterval, setCheckInterval] = useState(3600);
   const [cooldownMin, setCooldownMin] = useState(60);
 
   const { data: monitors = [] } = useQuery<LogMonitor[]>({
@@ -79,6 +89,7 @@ export function LogMonitor() {
     setNotifyAction(!!m.notify_action);
     setActionContainerId(m.action_container_id ?? '');
     setActionType((m.action_type as 'start' | 'stop' | 'restart') ?? 'restart');
+    setCheckInterval(m.check_interval_s);
     setCooldownMin(m.cooldown_s / 60);
     setEditTarget(m);
     setShowForm(true);
@@ -110,6 +121,7 @@ export function LogMonitor() {
       notify_action: notifyAction ? 1 : 0,
       action_container_id: notifyAction ? actionContainerId || null : null,
       action_type: notifyAction ? actionType : null,
+      check_interval_s: checkInterval,
       cooldown_s: cooldownMin * 60,
     };
   };
@@ -193,7 +205,15 @@ export function LogMonitor() {
                   </div>
                 )}
                 <div className="form-row">
-                  <label>Cooldown</label>
+                  <label>Check every</label>
+                  <select value={checkInterval} onChange={e => setCheckInterval(parseInt(e.target.value))}>
+                    {CHECK_INTERVALS.map(o => (
+                      <option key={o.value} value={o.value}>{o.label}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="form-row">
+                  <label>Cooldown (min between alerts)</label>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                     <input
                       type="number"
@@ -293,6 +313,7 @@ export function LogMonitor() {
                   <th>Source</th>
                   <th>Keywords</th>
                   <th>Notifications</th>
+                  <th>Check every</th>
                   <th>Last fired</th>
                   <th></th>
                 </tr>
@@ -323,6 +344,9 @@ export function LogMonitor() {
                         {m.notify_record ? <span title="Record" style={{ color: 'var(--accent)' }}><Database size={14} /></span> : null}
                         {m.notify_action ? <span title={`Action: ${m.action_type ?? ''}`} style={{ color: 'var(--accent)' }}><Play size={14} /></span> : null}
                       </div>
+                    </td>
+                    <td style={{ color: 'var(--text-muted)', fontSize: 12 }}>
+                      {CHECK_INTERVALS.find(o => o.value === m.check_interval_s)?.label ?? `${m.check_interval_s / 60}m`}
                     </td>
                     <td style={{ color: 'var(--text-muted)', fontSize: 12 }}>
                       {m.last_fired_at ? formatDate(m.last_fired_at) : '—'}
