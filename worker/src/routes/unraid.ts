@@ -36,20 +36,38 @@ unraidRoutes.get('/docker', async (c) => {
 
 unraidRoutes.post('/docker/:id/start', async (c) => {
   const { url, apiKey } = c.get('server');
-  await unraid.containerAction(url, apiKey, c.req.param('id'), 'start');
-  return c.json({ ok: true });
+  try {
+    await unraid.containerAction(url, apiKey, c.req.param('id'), 'start');
+    return c.json({ ok: true });
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    console.error('Docker start failed:', msg);
+    return c.json({ error: msg }, 500);
+  }
 });
 
 unraidRoutes.post('/docker/:id/stop', async (c) => {
   const { url, apiKey } = c.get('server');
-  await unraid.containerAction(url, apiKey, c.req.param('id'), 'stop');
-  return c.json({ ok: true });
+  try {
+    await unraid.containerAction(url, apiKey, c.req.param('id'), 'stop');
+    return c.json({ ok: true });
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    console.error('Docker stop failed:', msg);
+    return c.json({ error: msg }, 500);
+  }
 });
 
 unraidRoutes.post('/docker/:id/restart', async (c) => {
   const { url, apiKey } = c.get('server');
-  await unraid.containerAction(url, apiKey, c.req.param('id'), 'restart');
-  return c.json({ ok: true });
+  try {
+    await unraid.containerAction(url, apiKey, c.req.param('id'), 'restart');
+    return c.json({ ok: true });
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    console.error('Docker restart failed:', msg);
+    return c.json({ error: msg }, 500);
+  }
 });
 
 unraidRoutes.get('/docker/:id/logs', async (c) => {

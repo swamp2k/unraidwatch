@@ -328,9 +328,11 @@ export function startContainerStatsWs(
 }
 
 export async function containerAction(url: string, apiKey: string, id: string, action: 'start' | 'stop' | 'restart'): Promise<void> {
-  // Container IDs from the API are "serverid:containerid" — extract the container portion
   const containerId = id.includes(':') ? id.split(':')[1]! : id;
-  await gql(url, apiKey, `mutation { docker { ${action}Container(id: "${containerId}") } }`);
+  const mutation = `mutation { docker { ${action}Container(id: "${containerId}") } }`;
+  console.log(`containerAction: ${action} id=${containerId} mutation=${mutation}`);
+  const result = await gql(url, apiKey, mutation);
+  console.log(`containerAction result:`, JSON.stringify(result));
 }
 
 export async function vmAction(url: string, apiKey: string, id: string, action: 'start' | 'stop'): Promise<void> {
