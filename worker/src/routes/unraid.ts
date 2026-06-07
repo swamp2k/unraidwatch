@@ -34,12 +34,6 @@ unraidRoutes.get('/docker', async (c) => {
   return c.json(await unraid.getContainers(url, apiKey));
 });
 
-// Temporary: introspect Unraid GraphQL schema for mutation fields
-unraidRoutes.get('/graphql-mutations', async (c) => {
-  const { url, apiKey } = c.get('server');
-  const data = await unraid.introspectMutations(url, apiKey);
-  return c.json(data);
-});
 
 unraidRoutes.post('/docker/:id/start', async (c) => {
   const { url, apiKey } = c.get('server');

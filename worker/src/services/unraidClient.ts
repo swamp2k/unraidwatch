@@ -327,34 +327,15 @@ export function startContainerStatsWs(
   void run();
 }
 
-export async function introspectMutations(url: string, apiKey: string): Promise<unknown> {
-  // Unwrap NON_NULL via ofType so we can see actual object fields
-  const data = await gql(url, apiKey, `{
-    __schema {
-      mutationType {
-        fields {
-          name
-          type {
-            name kind
-            ofType { name kind fields { name args { name type { name kind ofType { name kind } } } } }
-            fields { name args { name type { name kind ofType { name kind } } } }
-          }
-        }
-      }
-    }
-  }`) as { __schema: { mutationType: { fields: Array<{ name: string; type: { name: string | null; kind: string; fields: unknown[] | null; ofType: { name: string | null; kind: string; fields: unknown[] | null } | null } }> } } };
-
-  // Return only the docker entry to keep the response small
-  const dockerField = data.__schema.mutationType.fields.find(f => f.name === 'docker');
-  return { docker: dockerField };
-}
 
 export async function containerAction(url: string, apiKey: string, id: string, action: 'start' | 'stop' | 'restart'): Promise<void> {
-  const containerId = id.includes(':') ? id.split(':')[1]! : id;
-  const mutation = `mutation { docker { ${action}Container(id: "${containerId}") } }`;
-  console.log(`containerAction: ${action} id=${containerId} mutation=${mutation}`);
-  const result = await gql(url, apiKey, mutation);
-  console.log(`containerAction result:`, JSON.stringify(result));
+  if (action === 'restart') {
+    await gql(url, apiKey, `mutation { docker { stop(id: "${id}") } }`);
+    await new Promise(r => setTimeout(r, 3000));
+    await gql(url, apiKey, `mutation { docker { start(id: "${id}") } }`);
+  } else {
+    await gql(url, apiKey, `mutation { docker { ${action}(id: "${id}") } }`);
+  }
 }
 
 export async function vmAction(url: string, apiKey: string, id: string, action: 'start' | 'stop'): Promise<void> {
