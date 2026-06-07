@@ -234,6 +234,11 @@ pre { background: var(--bg); border: 1px solid var(--border); border-radius: 8px
   from { opacity: 0; }
   to { opacity: 1; }
 }
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+.spin { animation: spin 0.7s linear infinite; display: inline-flex; }
 @keyframes slideInRight {
   from { transform: translateX(100%); }
   to { transform: translateX(0); }

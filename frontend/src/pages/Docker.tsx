@@ -2,7 +2,7 @@ import { useState, useMemo } from 'react';
 import { TopBar } from '../components/layout/TopBar';
 import { useSSE } from '../hooks/useSSE';
 import { api } from '../lib/api';
-import { Play, Square, RotateCcw, FileText, X } from 'lucide-react';
+import { Play, Square, RotateCcw, FileText, X, Loader2 } from 'lucide-react';
 import { API_BASE } from '../lib/api';
 
 type SortField = 'status' | 'name' | 'cpu' | 'ram';
@@ -165,13 +165,25 @@ export function Docker() {
                 </tr>
               </thead>
               <tbody>
-                {containers.map(c => (
-                  <tr key={c.id} style={{ opacity: c.status !== 'running' ? 0.6 : 1 }}>
+                {containers.map(c => {
+                  const pending =
+                    actioning === `${c.id}-start` ? 'starting' :
+                    actioning === `${c.id}-stop`  ? 'stopping' :
+                    actioning === `${c.id}-restart` ? 'restarting' : null;
+
+                  return (
+                  <tr key={c.id} style={{ opacity: c.status !== 'running' && !pending ? 0.6 : 1 }}>
                     <td style={{ fontWeight: c.status === 'running' ? 500 : 400 }}>{c.name}</td>
                     <td>
-                      <span className={`badge badge-${c.status === 'running' ? 'running' : 'stopped'}`}>
-                        {c.status}
-                      </span>
+                      {pending ? (
+                        <span className="badge" style={{ background: 'var(--bg-elevated)', color: 'var(--text-muted)', display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+                          <Loader2 size={11} className="spin" />{pending}…
+                        </span>
+                      ) : (
+                        <span className={`badge badge-${c.status === 'running' ? 'running' : 'stopped'}`}>
+                          {c.status}
+                        </span>
+                      )}
                     </td>
                     <td style={{ fontFamily: 'monospace', fontSize: 12 }}>{fmt(c.cpu_pct, '%')}</td>
                     <td style={{ fontFamily: 'monospace', fontSize: 12 }}>{fmt(c.mem_mb, ' MB')}</td>
@@ -180,17 +192,17 @@ export function Docker() {
                         <button className="btn-ghost" style={{ padding: '4px 8px' }} title="Start"
                           onClick={() => void doAction(c.id, 'start')}
                           disabled={actioning !== null || c.status === 'running'}>
-                          <Play size={13} />
+                          {actioning === `${c.id}-start` ? <Loader2 size={13} className="spin" /> : <Play size={13} />}
                         </button>
                         <button className="btn-ghost" style={{ padding: '4px 8px' }} title="Stop"
                           onClick={() => void doAction(c.id, 'stop')}
                           disabled={actioning !== null || c.status !== 'running'}>
-                          <Square size={13} />
+                          {actioning === `${c.id}-stop` ? <Loader2 size={13} className="spin" /> : <Square size={13} />}
                         </button>
                         <button className="btn-ghost" style={{ padding: '4px 8px' }} title="Restart"
                           onClick={() => void doAction(c.id, 'restart')}
                           disabled={actioning !== null || c.status !== 'running'}>
-                          <RotateCcw size={13} />
+                          {actioning === `${c.id}-restart` ? <Loader2 size={13} className="spin" /> : <RotateCcw size={13} />}
                         </button>
                         <button
                           className="btn-ghost" style={{ padding: '4px 8px', color: logsLoading === c.id ? 'var(--accent)' : undefined }}
@@ -201,7 +213,8 @@ export function Docker() {
                       </div>
                     </td>
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
           )}
