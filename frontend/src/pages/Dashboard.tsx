@@ -31,7 +31,7 @@ import { ArrayStatus } from '../components/widgets/ArrayStatus';
 import { SharesOverview } from '../components/widgets/SharesOverview';
 import { RecentAlerts } from '../components/widgets/RecentAlerts';
 
-interface ChartPoint { time: string; cpu: number; ram: number }
+interface ChartPoint { time: string; cpu: number; ram: number; temp: number }
 
 function WidgetRenderer({ id, sse, history }: {
   id: string;
@@ -63,7 +63,7 @@ export function Dashboard() {
   useEffect(() => {
     if (!sse.stats) return;
     const now = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-    setHistory(h => [...h.slice(-29), { time: now, cpu: sse.stats!.cpu_pct, ram: sse.stats!.ram_pct }]);
+    setHistory(h => [...h.slice(-359), { time: now, cpu: sse.stats!.cpu_pct, ram: sse.stats!.ram_pct, temp: sse.stats!.temp_avg }]);
   }, [sse.stats]);
 
   const { data: savedLayout } = useQuery<WidgetConfig[]>({
