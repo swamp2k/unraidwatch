@@ -327,6 +327,20 @@ export function startContainerStatsWs(
   void run();
 }
 
+export async function introspectMutations(url: string, apiKey: string): Promise<unknown> {
+  return gql(url, apiKey, `{
+    __schema {
+      mutationType {
+        fields {
+          name
+          args { name type { name kind ofType { name kind } } }
+          type { name kind }
+        }
+      }
+    }
+  }`);
+}
+
 export async function containerAction(url: string, apiKey: string, id: string, action: 'start' | 'stop' | 'restart'): Promise<void> {
   const containerId = id.includes(':') ? id.split(':')[1]! : id;
   const mutation = `mutation { docker { ${action}Container(id: "${containerId}") } }`;
