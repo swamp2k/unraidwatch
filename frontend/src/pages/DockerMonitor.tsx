@@ -93,6 +93,7 @@ export function DockerMonitor() {
 
   const containers = sse.docker ?? [];
   const watchedIds = new Set(monitors.map(m => m.container_id));
+  const liveStatus = new Map<string, string>(containers.map(c => [c.id, c.status]));
 
   return (
     <>
@@ -201,9 +202,14 @@ export function DockerMonitor() {
                   <tr key={m.id}>
                     <td style={{ fontWeight: 500 }}>{m.container_name}</td>
                     <td>
-                      <span className={`badge badge-${m.last_status === 'running' ? 'running' : m.last_status ? 'stopped' : 'stopped'}`}>
-                        {m.last_status ?? 'unknown'}
-                      </span>
+                      {(() => {
+                        const status = liveStatus.get(m.container_id) ?? m.last_status ?? 'unknown';
+                        return (
+                          <span className={`badge badge-${status === 'running' ? 'running' : 'stopped'}`}>
+                            {status}
+                          </span>
+                        );
+                      })()}
                     </td>
                     <td>
                       <div style={{ display: 'flex', gap: 6 }}>
