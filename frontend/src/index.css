@@ -238,3 +238,62 @@ pre { background: var(--bg); border: 1px solid var(--border); border-radius: 8px
   from { transform: translateX(100%); }
   to { transform: translateX(0); }
 }
+
+/* ── Monitor / Dashboard additions ─────────────────────────────────────── */
+
+.badge-down { background: #450a0a; color: var(--danger); }
+
+.keyword-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.keyword-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 9999px;
+  background: var(--bg-hover);
+  border: 1px solid var(--border);
+  font-size: 12px;
+  color: var(--text);
+}
+
+/* Modular dashboard grid */
+.dashboard-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 16px;
+}
+@media (max-width: 1024px) { .dashboard-grid { grid-template-columns: 1fr; } }
+
+/* Widget edit mode */
+.widget-edit-wrapper {
+  border-radius: 10px;
+  border: 1px dashed var(--accent);
+  overflow: hidden;
+}
+.widget-edit-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  background: color-mix(in srgb, var(--accent) 8%, var(--bg-card));
+  border-bottom: 1px dashed var(--accent);
+}
+.widget-drag-handle {
+  cursor: grab;
+  color: var(--text-muted);
+  padding: 4px;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  background: none;
+  border: none;
+}
+.widget-drag-handle:hover { color: var(--text); background: var(--bg-hover); }
+.widget-drag-handle:active { cursor: grabbing; }
+
+/* Full-width widgets in grid context */
+.dashboard-grid > * { grid-column: span 1; }
+
+/* Progress bar variants */
+.progress-danger { background: var(--danger) !important; }
+.progress-warn { background: var(--warning) !important; }

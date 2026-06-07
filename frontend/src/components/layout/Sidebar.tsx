@@ -1,5 +1,5 @@
 import { NavLink } from 'react-router-dom';
-import { LayoutDashboard, Box, Monitor, HardDrive, Zap, BrainCircuit, Search, Bell, Settings, ShieldCheck, LogOut } from 'lucide-react';
+import { LayoutDashboard, Box, Monitor, HardDrive, Zap, BrainCircuit, Search, Bell, Settings, ShieldCheck, LogOut, Activity, ScrollText } from 'lucide-react';
 import { useAuth } from '../../hooks/useAuth';
 
 const navItems = [
@@ -11,6 +11,8 @@ const navItems = [
   { to: '/ai', label: 'AI Syslog', icon: BrainCircuit },
   { to: '/detective', label: 'AI Detective', icon: Search },
   { to: '/alerts', label: 'Alerts', icon: Bell },
+  { to: '/monitors/docker', label: 'Docker Monitor', icon: Activity },
+  { to: '/monitors/log', label: 'Log Monitor', icon: ScrollText },
   { to: '/settings', label: 'Settings', icon: Settings },
 ];
 

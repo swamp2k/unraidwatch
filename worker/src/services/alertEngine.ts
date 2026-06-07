@@ -1,17 +1,7 @@
-import type { Env, AlertRule } from '../types';
+import type { Env, AlertRule, UserRow } from '../types';
 import { decrypt } from './encryption';
 import { getStats, getContainers, getUPS } from './unraidClient';
 import { sendAlertEmail } from './emailService';
-
-interface UserRow {
-  id: string;
-  email: string;
-  url: string;
-  api_key: string;
-  email_alerts: number;
-  push_alerts: number;
-  alert_min_severity: string;
-}
 
 function evaluate(rule: AlertRule, value: number | string): boolean {
   const numVal = typeof value === 'number' ? value : parseFloat(value as string);

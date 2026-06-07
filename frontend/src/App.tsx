@@ -16,6 +16,8 @@ import { Alerts } from './pages/Alerts';
 import { Settings } from './pages/Settings';
 import { AdminInvites } from './pages/AdminInvites';
 import { Detective } from './pages/Detective';
+import { DockerMonitor } from './pages/DockerMonitor';
+import { LogMonitor } from './pages/LogMonitor';
 
 function AppLayout({ children }: { children: React.ReactNode }) {
   return (
@@ -53,6 +55,8 @@ export default function App() {
       <Route path="/alerts" element={<ProtectedRoute><AppLayout><Alerts /></AppLayout></ProtectedRoute>} />
       <Route path="/settings/*" element={<ProtectedRoute><AppLayout><Settings /></AppLayout></ProtectedRoute>} />
       <Route path="/detective" element={<ProtectedRoute><AppLayout><Detective /></AppLayout></ProtectedRoute>} />
+      <Route path="/monitors/docker" element={<ProtectedRoute><AppLayout><DockerMonitor /></AppLayout></ProtectedRoute>} />
+      <Route path="/monitors/log" element={<ProtectedRoute><AppLayout><LogMonitor /></AppLayout></ProtectedRoute>} />
       <Route path="/admin/invites" element={<ProtectedRoute adminOnly><AppLayout><AdminInvites /></AppLayout></ProtectedRoute>} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

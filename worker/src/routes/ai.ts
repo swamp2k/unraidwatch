@@ -4,26 +4,7 @@ import { authMiddleware } from '../middleware/auth';
 import { decrypt } from '../services/encryption';
 import { analyzeLog } from '../services/aiClient';
 import { getSyslog } from '../services/unraidClient';
-
-const MONTHS: Record<string, number> = { Jan:0,Feb:1,Mar:2,Apr:3,May:4,Jun:5,Jul:6,Aug:7,Sep:8,Oct:9,Nov:10,Dec:11 };
-
-export function filterSyslogByHours(content: string, hours: number): string {
-  const cutoffMs = Date.now() - hours * 3_600_000;
-  const year = new Date().getFullYear();
-
-  const filtered = content.split('\n').filter(line => {
-    const m = line.match(/^(\w{3})\s+(\d{1,2})\s+(\d{2}):(\d{2}):(\d{2})/);
-    if (!m) return false;
-    const monthNum = MONTHS[m[1]];
-    if (monthNum === undefined) return false;
-    let ts = new Date(year, monthNum, parseInt(m[2]!), parseInt(m[3]!), parseInt(m[4]!), parseInt(m[5]!)).getTime();
-    // If parsed time is far in the future it's last year (Dec→Jan boundary)
-    if (ts > Date.now() + 86_400_000) ts -= 365 * 86_400_000;
-    return ts >= cutoffMs;
-  });
-
-  return filtered.join('\n');
-}
+import { filterSyslogByHours } from '../lib/syslogUtils';
 
 const ai = new Hono<{ Bindings: Env; Variables: { user: User } }>();
 

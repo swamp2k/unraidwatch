@@ -12,6 +12,9 @@ import alertRoutes from './routes/alerts';
 import pushRoutes from './routes/push';
 import detectiveRoutes from './routes/detective';
 import { evaluateAlerts } from './services/alertEngine';
+import { evaluateDockerMonitors } from './services/dockerMonitorEngine';
+import { evaluateLogMonitors } from './services/logMonitorEngine';
+import monitorRoutes from './routes/monitors';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -27,6 +30,7 @@ app.route('/api/ai', aiRoutes);
 app.route('/api/alerts', alertRoutes);
 app.route('/api/push', pushRoutes);
 app.route('/api/detective', detectiveRoutes);
+app.route('/api/monitors', monitorRoutes);
 
 app.get('/api/health', (c) => c.json({ ok: true }));
 
@@ -48,6 +52,8 @@ export default {
 
     for (const user of users.results) {
       ctx.waitUntil(evaluateAlerts(user, env));
+      ctx.waitUntil(evaluateDockerMonitors(user, env));
+      ctx.waitUntil(evaluateLogMonitors(user, env));
     }
 
     // Daily briefing

@@ -5,7 +5,7 @@ import { decrypt } from '../services/encryption';
 import {
   getStats, getContainers, getArray, getShares, getSyslog, getContainerLogs,
 } from '../services/unraidClient';
-import { filterSyslogByHours } from './ai';
+import { filterSyslogByHours } from '../lib/syslogUtils';
 
 export interface DetectiveResult {
   severity: 'ok' | 'warning' | 'critical';
