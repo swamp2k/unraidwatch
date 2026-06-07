@@ -330,11 +330,11 @@ export function startContainerStatsWs(
 
 export async function containerAction(url: string, apiKey: string, id: string, action: 'start' | 'stop' | 'restart'): Promise<void> {
   if (action === 'restart') {
-    await gql(url, apiKey, `mutation { docker { stop(id: "${id}") } }`);
+    await gql(url, apiKey, `mutation { docker { stop(id: "${id}") { id } } }`);
     await new Promise(r => setTimeout(r, 3000));
-    await gql(url, apiKey, `mutation { docker { start(id: "${id}") } }`);
+    await gql(url, apiKey, `mutation { docker { start(id: "${id}") { id } } }`);
   } else {
-    await gql(url, apiKey, `mutation { docker { ${action}(id: "${id}") } }`);
+    await gql(url, apiKey, `mutation { docker { ${action}(id: "${id}") { id } } }`);
   }
 }
 
