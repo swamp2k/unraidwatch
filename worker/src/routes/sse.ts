@@ -56,12 +56,14 @@ sse.get('/', async (c) => {
       if (now - lastMetricWrite >= 60_000) {
         lastMetricWrite = now;
         const ts = Math.floor(now / 60_000) * 60;
-        c.env.DB.prepare(
-          'INSERT OR IGNORE INTO system_metrics (server_id, ts, cpu_pct, ram_pct) VALUES (?, ?, ?, ?)'
-        ).bind(serverId, ts, stats.cpu_pct, stats.ram_pct).run().catch(() => {});
-        c.env.DB.prepare(
-          'DELETE FROM system_metrics WHERE server_id = ? AND ts < unixepoch() - 604800'
-        ).bind(serverId).run().catch(() => {});
+        try {
+          await c.env.DB.prepare(
+            'INSERT OR IGNORE INTO system_metrics (server_id, ts, cpu_pct, ram_pct) VALUES (?, ?, ?, ?)'
+          ).bind(serverId, ts, stats.cpu_pct, stats.ram_pct).run();
+          await c.env.DB.prepare(
+            'DELETE FROM system_metrics WHERE server_id = ? AND ts < unixepoch() - 604800'
+          ).bind(serverId).run();
+        } catch { /* table may not exist yet during migration rollout */ }
       }
     }
     if (results[1].status === 'fulfilled') {
