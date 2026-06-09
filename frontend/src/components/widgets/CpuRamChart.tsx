@@ -33,7 +33,7 @@ function formatTs(ts: number, window: HistWindow): string {
 }
 
 export function CpuRamChart({ history }: Props) {
-  const [window, setWindow] = useState<Window>('5m');
+  const [window, setWindow] = useState<Window>('1h');
 
   const isHistorical = (HIST_WINDOWS as readonly string[]).includes(window);
 
