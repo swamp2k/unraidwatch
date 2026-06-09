@@ -46,6 +46,7 @@ export function Docker() {
   const [actioning, setActioning] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [logsLoading, setLogsLoading] = useState<string | null>(null);
+  const [statusOverrides, setStatusOverrides] = useState<Record<string, string>>({});
 
   function setSort(field: SortField) {
     if (field === sortField) {
@@ -58,10 +59,12 @@ export function Docker() {
   }
 
   const containers = useMemo(() => {
-    const list = sse.docker ?? [];
+    const list = (sse.docker ?? []).map(c =>
+      statusOverrides[c.id] ? { ...c, status: statusOverrides[c.id]! } : c
+    );
     const filtered = runningOnly ? list.filter(c => c.status === 'running') : list;
     return sortContainers(filtered, sortField, sortDir);
-  }, [sse.docker, sortField, sortDir, runningOnly]);
+  }, [sse.docker, statusOverrides, sortField, sortDir, runningOnly]);
 
   const runningCount = (sse.docker ?? []).filter(c => c.status === 'running').length;
   const totalCount   = (sse.docker ?? []).length;
@@ -71,6 +74,7 @@ export function Docker() {
     setActionError(null);
     try {
       await api.post(`/api/unraid/docker/${encodeURIComponent(id)}/${act}`);
+      setStatusOverrides(prev => ({ ...prev, [id]: act === 'stop' ? 'stopped' : 'running' }));
     } catch (e) {
       setActionError(e instanceof Error ? e.message : String(e));
     } finally {
