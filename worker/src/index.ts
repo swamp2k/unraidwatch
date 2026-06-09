@@ -15,6 +15,7 @@ import { evaluateAlerts } from './services/alertEngine';
 import { evaluateDockerMonitors } from './services/dockerMonitorEngine';
 import { evaluateLogMonitors } from './services/logMonitorEngine';
 import monitorRoutes from './routes/monitors';
+import metricsRoutes from './routes/metrics';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -31,6 +32,7 @@ app.route('/api/alerts', alertRoutes);
 app.route('/api/push', pushRoutes);
 app.route('/api/detective', detectiveRoutes);
 app.route('/api/monitors', monitorRoutes);
+app.route('/api/metrics', metricsRoutes);
 
 app.get('/api/health', (c) => c.json({ ok: true }));
 

@@ -1,55 +1,93 @@
 import { useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend } from 'recharts';
+import { api } from '../../lib/api';
 
 interface ChartPoint { time: string; cpu: number; ram: number; temp?: number }
+interface ApiPoint { ts: number; cpu_pct: number; ram_pct: number }
 
 interface Props {
   history: ChartPoint[];
 }
 
-const WINDOWS = [
+const LIVE_WINDOWS = [
   { label: '2m',  points: 24 },
   { label: '5m',  points: 60 },
   { label: '15m', points: 180 },
   { label: '30m', points: 360 },
 ] as const;
 
-type Window = typeof WINDOWS[number]['label'];
+const HIST_WINDOWS = ['1h', '6h', '24h', '7d'] as const;
+type HistWindow = typeof HIST_WINDOWS[number];
+type Window = typeof LIVE_WINDOWS[number]['label'] | HistWindow;
+
+const ALL_WINDOWS: Window[] = ['2m', '5m', '15m', '30m', '1h', '6h', '24h', '7d'];
+
+function formatTs(ts: number, window: HistWindow): string {
+  const d = new Date(ts * 1000);
+  if (window === '7d') {
+    return d.toLocaleDateString([], { month: 'short', day: 'numeric' }) +
+      ' ' + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  }
+  return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+}
 
 export function CpuRamChart({ history }: Props) {
   const [window, setWindow] = useState<Window>('5m');
 
-  const points = WINDOWS.find(w => w.label === window)!.points;
-  const slice = history.slice(-points);
+  const isHistorical = (HIST_WINDOWS as readonly string[]).includes(window);
 
-  // X-axis: show a label only every ~6 points to avoid crowding
-  const tickInterval = Math.max(1, Math.floor(points / 6));
+  const { data: apiData, isLoading } = useQuery<ApiPoint[]>({
+    queryKey: ['metrics-history', window],
+    queryFn: () => api.get<ApiPoint[]>(`/api/metrics/history?window=${window}`),
+    enabled: isHistorical,
+    refetchInterval: 60_000,
+    staleTime: 30_000,
+  });
+
+  let displayData: ChartPoint[];
+  if (isHistorical) {
+    displayData = (apiData ?? []).map(p => ({
+      time: formatTs(p.ts, window as HistWindow),
+      cpu: p.cpu_pct,
+      ram: p.ram_pct,
+    }));
+  } else {
+    const liveWindow = LIVE_WINDOWS.find(w => w.label === window)!;
+    displayData = history.slice(-liveWindow.points);
+  }
+
+  const tickInterval = Math.max(1, Math.floor(displayData.length / 6));
+
+  const placeholder = isHistorical && isLoading
+    ? 'Loading…'
+    : 'Collecting data…';
 
   return (
     <div className="card">
       <div className="flex items-center justify-between mb-3">
         <span style={{ fontWeight: 600, fontSize: 14 }}>CPU &amp; RAM</span>
         <div className="flex gap-1">
-          {WINDOWS.map(w => (
+          {ALL_WINDOWS.map(w => (
             <button
-              key={w.label}
-              onClick={() => setWindow(w.label)}
-              className={window === w.label ? 'btn-primary' : 'btn-ghost'}
+              key={w}
+              onClick={() => setWindow(w)}
+              className={window === w ? 'btn-primary' : 'btn-ghost'}
               style={{ padding: '3px 10px', fontSize: 11 }}
             >
-              {w.label}
+              {w}
             </button>
           ))}
         </div>
       </div>
 
-      {slice.length < 2 ? (
+      {displayData.length < 2 ? (
         <div style={{ height: 180, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)', fontSize: 13 }}>
-          Collecting data…
+          {placeholder}
         </div>
       ) : (
         <ResponsiveContainer width="100%" height={180}>
-          <AreaChart data={slice} margin={{ top: 4, right: 4, bottom: 0, left: -8 }}>
+          <AreaChart data={displayData} margin={{ top: 4, right: 4, bottom: 0, left: -8 }}>
             <defs>
               <linearGradient id="gCpu" x1="0" y1="0" x2="0" y2="1">
                 <stop offset="5%"  stopColor="#6366f1" stopOpacity={0.3} />

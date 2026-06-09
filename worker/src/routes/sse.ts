@@ -13,13 +13,13 @@ sse.use('*', authMiddleware);
 
 sse.get('/', async (c) => {
   const user = c.get('user');
-  const row = await c.env.DB.prepare('SELECT url, api_key FROM servers WHERE user_id = ?')
-    .bind(user.id).first<{ url: string; api_key: string }>();
+  const row = await c.env.DB.prepare('SELECT id, url, api_key FROM servers WHERE user_id = ?')
+    .bind(user.id).first<{ id: string; url: string; api_key: string }>();
 
   if (!row) return c.json({ error: 'No server configured' }, 404);
 
   const apiKey = await decrypt(row.api_key, c.env);
-  const { url } = row;
+  const { id: serverId, url } = row;
 
   const { readable, writable } = new TransformStream<Uint8Array, Uint8Array>();
   const writer = writable.getWriter();
@@ -37,6 +37,8 @@ sse.get('/', async (c) => {
   // Abort the WebSocket when the SSE stream closes
   void writer.closed.finally(() => statsAbort.abort());
 
+  let lastMetricWrite = 0;
+
   async function poll(): Promise<void> {
     const results = await Promise.allSettled([
       getStats(url, apiKey),
@@ -47,7 +49,21 @@ sse.get('/', async (c) => {
       getUPS(url, apiKey),
     ]);
 
-    if (results[0].status === 'fulfilled') emit('stats', results[0].value);
+    if (results[0].status === 'fulfilled') {
+      const stats = results[0].value;
+      emit('stats', stats);
+      const now = Date.now();
+      if (now - lastMetricWrite >= 60_000) {
+        lastMetricWrite = now;
+        const ts = Math.floor(now / 60_000) * 60;
+        c.env.DB.prepare(
+          'INSERT OR IGNORE INTO system_metrics (server_id, ts, cpu_pct, ram_pct) VALUES (?, ?, ?, ?)'
+        ).bind(serverId, ts, stats.cpu_pct, stats.ram_pct).run().catch(() => {});
+        c.env.DB.prepare(
+          'DELETE FROM system_metrics WHERE server_id = ? AND ts < unixepoch() - 604800'
+        ).bind(serverId).run().catch(() => {});
+      }
+    }
     if (results[1].status === 'fulfilled') {
       // Merge live CPU/RAM from WebSocket cache into the container list
       const containers = results[1].value.map(c => ({
