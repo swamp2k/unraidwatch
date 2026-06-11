@@ -27,3 +27,10 @@ export function progressColor(pct: number): string {
   if (pct >= 75) return 'warn';
   return '';
 }
+
+export function formatKbps(kbps: number): string {
+  if (kbps <= 0) return '—';
+  if (kbps >= 1_000_000) return `${(kbps / 1_000_000).toFixed(1)} GB/s`;
+  if (kbps >= 1_000) return `${(kbps / 1_000).toFixed(1)} MB/s`;
+  return `${kbps} KB/s`;
+}

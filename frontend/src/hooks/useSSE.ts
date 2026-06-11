@@ -2,8 +2,25 @@ import { useState, useEffect, useRef } from 'react';
 import { API_BASE } from '../lib/api';
 
 export interface SSEData {
-  stats?: { cpu_pct: number; ram_pct: number; ram_used_gb: number; ram_total_gb: number; uptime_s: number; temp_avg: number };
-  docker?: Array<{ id: string; name: string; status: string; cpu_pct: number; mem_mb: number }>;
+  stats?: {
+    cpu_pct: number;
+    ram_pct: number;
+    ram_used_gb: number;
+    ram_total_gb: number;
+    uptime_s: number;
+    temp_avg: number;
+    net_rx_kbps: number;
+    net_tx_kbps: number;
+  };
+  docker?: Array<{
+    id: string;
+    name: string;
+    status: string;
+    cpu_pct: number;
+    mem_mb: number;
+    net_rx_kbps: number;
+    net_tx_kbps: number;
+  }>;
   vms?: Array<{ id: string; name: string; status: string; cpu_pct: number; mem_gb: number }>;
   array?: { status: string; capacity_used_tb: number; capacity_total_tb: number; disks: unknown[]; cache: unknown[] };
   shares?: Array<{ name: string; used_gb: number; total_gb: number; pct: number }>;

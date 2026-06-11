@@ -5,6 +5,8 @@ export interface UnraidStats {
   ram_total_gb: number;
   uptime_s: number;
   temp_avg: number;
+  net_rx_kbps: number;
+  net_tx_kbps: number;
 }
 
 export interface UnraidDisk {
@@ -30,6 +32,8 @@ export interface UnraidContainer {
   status: string;
   cpu_pct: number;
   mem_mb: number;
+  net_rx_kbps: number;
+  net_tx_kbps: number;
 }
 
 export interface UnraidVM {
@@ -111,7 +115,52 @@ export async function getStats(url: string, apiKey: string): Promise<UnraidStats
     ram_total_gb: Math.round(totalGb),
     uptime_s: Math.max(0, uptimeS),
     temp_avg: Math.round(metrics.temperature?.summary?.average ?? 0),
+    net_rx_kbps: 0,
+    net_tx_kbps: 0,
   };
+}
+
+// Attempt to fetch system-level network throughput — returns null if the
+// Unraid API version doesn't expose this data.
+export async function getNetworkStats(url: string, apiKey: string): Promise<{ rx_kbps: number; tx_kbps: number } | null> {
+  try {
+    const data = await gql(url, apiKey, `
+      query {
+        metrics {
+          network {
+            interfaces {
+              name
+              rxBytesPerSec
+              txBytesPerSec
+            }
+          }
+        }
+      }
+    `) as {
+      metrics: {
+        network: {
+          interfaces: Array<{ name: string; rxBytesPerSec: number; txBytesPerSec: number }>;
+        } | null;
+      };
+    };
+
+    const ifaces = data?.metrics?.network?.interfaces;
+    if (!ifaces?.length) return null;
+
+    // Sum across all interfaces, exclude loopback
+    let rx = 0, tx = 0;
+    for (const iface of ifaces) {
+      if (iface.name === 'lo') continue;
+      rx += iface.rxBytesPerSec ?? 0;
+      tx += iface.txBytesPerSec ?? 0;
+    }
+    return {
+      rx_kbps: Math.round(rx / 1000),
+      tx_kbps: Math.round(tx / 1000),
+    };
+  } catch {
+    return null;
+  }
 }
 
 interface RawDisk {
@@ -187,6 +236,8 @@ export async function getContainers(url: string, apiKey: string): Promise<Unraid
     status: c.state.toLowerCase(),
     cpu_pct: 0,
     mem_mb: 0,
+    net_rx_kbps: 0,
+    net_tx_kbps: 0,
   }));
 }
 
@@ -263,7 +314,16 @@ export async function getUPS(url: string, apiKey: string): Promise<UnraidUPS | n
 
 // ── Container stats via WebSocket subscription ─────────────────────────────
 
-export interface ContainerStatEntry { cpu: number; memMb: number }
+export interface ContainerStatEntry {
+  cpu: number;
+  memMb: number;
+  netRxKbps: number;
+  netTxKbps: number;
+  // Internal: previous cumulative byte values for rate calculation
+  _prevRxBytes?: number;
+  _prevTxBytes?: number;
+  _prevTs?: number;
+}
 
 function parseMemMb(raw: string): number {
   const used = raw.split('/')[0]?.trim() ?? '';
@@ -296,7 +356,6 @@ export function startContainerStatsWs(
           ws.addEventListener('error', () => resolve());
 
           ws.addEventListener('open', () => {
-            // graphql-transport-ws auth: send API key in connection_init payload
             ws.send(JSON.stringify({ type: 'connection_init', payload: { 'x-api-key': apiKey } }));
           });
 
@@ -304,16 +363,56 @@ export function startContainerStatsWs(
             try {
               const msg = JSON.parse(evt.data as string) as {
                 type: string;
-                payload?: { data?: { dockerContainerStats?: { id: string; cpuPercent: number; memUsage: string } } };
+                payload?: {
+                  data?: {
+                    dockerContainerStats?: {
+                      id: string;
+                      cpuPercent: number;
+                      memUsage: string;
+                      networkRxBytes?: number;
+                      networkTxBytes?: number;
+                    };
+                  };
+                };
               };
               if (msg.type === 'connection_ack') {
                 ws.send(JSON.stringify({
                   id: '1', type: 'subscribe',
-                  payload: { query: 'subscription { dockerContainerStats { id cpuPercent memUsage } }' },
+                  payload: { query: 'subscription { dockerContainerStats { id cpuPercent memUsage networkRxBytes networkTxBytes } }' },
                 }));
               } else if (msg.type === 'next') {
                 const s = msg.payload?.data?.dockerContainerStats;
-                if (s) cache.set(s.id, { cpu: Math.round(s.cpuPercent * 10) / 10, memMb: parseMemMb(s.memUsage) });
+                if (s) {
+                  const prev = cache.get(s.id);
+                  const now = Date.now();
+                  let netRxKbps = 0;
+                  let netTxKbps = 0;
+
+                  // Calculate network rate from cumulative byte counters
+                  if (
+                    s.networkRxBytes !== undefined &&
+                    s.networkTxBytes !== undefined &&
+                    prev?._prevRxBytes !== undefined &&
+                    prev._prevTxBytes !== undefined &&
+                    prev._prevTs !== undefined
+                  ) {
+                    const elapsed = (now - prev._prevTs) / 1000;
+                    if (elapsed > 0) {
+                      netRxKbps = Math.max(0, Math.round((s.networkRxBytes - prev._prevRxBytes) / elapsed / 1000));
+                      netTxKbps = Math.max(0, Math.round((s.networkTxBytes - prev._prevTxBytes) / elapsed / 1000));
+                    }
+                  }
+
+                  cache.set(s.id, {
+                    cpu: Math.round(s.cpuPercent * 10) / 10,
+                    memMb: parseMemMb(s.memUsage),
+                    netRxKbps,
+                    netTxKbps,
+                    _prevRxBytes: s.networkRxBytes,
+                    _prevTxBytes: s.networkTxBytes,
+                    _prevTs: now,
+                  });
+                }
               }
             } catch { /* ignore parse errors */ }
           });

@@ -1,20 +1,40 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect, Fragment } from 'react';
 import { TopBar } from '../components/layout/TopBar';
 import { useSSE } from '../hooks/useSSE';
 import { api } from '../lib/api';
-import { Play, Square, RotateCcw, FileText, X, Loader2 } from 'lucide-react';
+import { useQuery } from '@tanstack/react-query';
+import { Play, Square, RotateCcw, FileText, X, Loader2, BarChart2, ChevronDown, ChevronUp } from 'lucide-react';
 import { API_BASE } from '../lib/api';
+import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend } from 'recharts';
+import { formatKbps } from '../lib/format';
 
-type SortField = 'status' | 'name' | 'cpu' | 'ram';
+type SortField = 'status' | 'name' | 'cpu' | 'ram' | 'net';
 type SortDir = 'asc' | 'desc';
-type Container = { id: string; name: string; status: string; cpu_pct: number; mem_mb: number };
+type Container = { id: string; name: string; status: string; cpu_pct: number; mem_mb: number; net_rx_kbps: number; net_tx_kbps: number };
 
 const SORT_OPTIONS: { field: SortField; label: string }[] = [
   { field: 'status', label: 'Running first' },
   { field: 'name',   label: 'Name' },
   { field: 'cpu',    label: 'CPU' },
   { field: 'ram',    label: 'RAM' },
+  { field: 'net',    label: 'Network' },
 ];
+
+const STORAGE_KEY = 'docker-tab-prefs';
+
+interface DockerPrefs { sortField: SortField; sortDir: SortDir; runningOnly: boolean }
+
+function loadPrefs(): DockerPrefs {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (raw) return JSON.parse(raw) as DockerPrefs;
+  } catch { /* ignore */ }
+  return { sortField: 'status', sortDir: 'desc', runningOnly: false };
+}
+
+function savePrefs(p: DockerPrefs) {
+  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(p)); } catch { /* ignore */ }
+}
 
 function sortContainers(containers: Container[], field: SortField, dir: SortDir): Container[] {
   return [...containers].sort((a, b) => {
@@ -28,29 +48,166 @@ function sortContainers(containers: Container[], field: SortField, dir: SortDir)
       case 'name': cmp = a.name.localeCompare(b.name); break;
       case 'cpu':  cmp = a.cpu_pct - b.cpu_pct; break;
       case 'ram':  cmp = a.mem_mb  - b.mem_mb;  break;
+      case 'net':  cmp = (a.net_rx_kbps + a.net_tx_kbps) - (b.net_rx_kbps + b.net_tx_kbps); break;
     }
     return dir === 'desc' ? -cmp : cmp;
   });
 }
 
-function fmt(n: number, unit: string) {
+function fmtNum(n: number, unit: string) {
   return n > 0 ? `${n}${unit}` : <span style={{ color: 'var(--text-muted)' }}>—</span>;
 }
 
+// ── Container History Chart ────────────────────────────────────────────────
+
+type HistWindow = '1h' | '6h' | '24h' | '7d';
+interface ContainerMetricPoint { ts: number; cpu_pct: number; mem_mb: number; net_rx_kbps: number; net_tx_kbps: number }
+
+function formatTs(ts: number, window: HistWindow): string {
+  const d = new Date(ts * 1000);
+  if (window === '7d') {
+    return d.toLocaleDateString([], { month: 'short', day: 'numeric' }) +
+      ' ' + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  }
+  return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+}
+
+function ContainerHistory({ containerId }: { containerId: string }) {
+  const [window, setWindow] = useState<HistWindow>('1h');
+
+  const { data, isLoading } = useQuery<ContainerMetricPoint[]>({
+    queryKey: ['container-history', containerId, window],
+    queryFn: () => api.get<ContainerMetricPoint[]>(`/api/metrics/history/container/${encodeURIComponent(containerId)}?window=${window}`),
+    refetchInterval: 60_000,
+    staleTime: 30_000,
+  });
+
+  const points = data ?? [];
+  const tickInterval = Math.max(1, Math.floor(points.length / 6));
+
+  const cpuRamData = points.map(p => ({ time: formatTs(p.ts, window), cpu: p.cpu_pct, ram: p.mem_mb }));
+  const netData = points.map(p => ({ time: formatTs(p.ts, window), rx: p.net_rx_kbps, tx: p.net_tx_kbps }));
+  const hasNet = points.some(p => p.net_rx_kbps > 0 || p.net_tx_kbps > 0);
+
+  const HIST_WINDOWS: HistWindow[] = ['1h', '6h', '24h', '7d'];
+
+  return (
+    <div style={{ padding: '12px 16px', background: 'var(--bg)', borderTop: '1px solid var(--border)' }}>
+      <div className="flex gap-1 mb-3">
+        {HIST_WINDOWS.map(w => (
+          <button
+            key={w}
+            onClick={() => setWindow(w)}
+            className={window === w ? 'btn-primary' : 'btn-ghost'}
+            style={{ padding: '3px 10px', fontSize: 11 }}
+          >
+            {w}
+          </button>
+        ))}
+      </div>
+
+      {isLoading ? (
+        <div style={{ height: 80, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)', fontSize: 13 }}>
+          Loading…
+        </div>
+      ) : points.length < 2 ? (
+        <div style={{ height: 80, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)', fontSize: 13 }}>
+          No history yet — data is collected every minute while the container is running.
+        </div>
+      ) : (
+        <div style={{ display: 'grid', gridTemplateColumns: hasNet ? '1fr 1fr 1fr' : '1fr 1fr', gap: 12 }}>
+          {/* CPU */}
+          <div>
+            <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4 }}>CPU %</div>
+            <ResponsiveContainer width="100%" height={100}>
+              <AreaChart data={cpuRamData} margin={{ top: 2, right: 2, bottom: 0, left: -20 }}>
+                <defs>
+                  <linearGradient id={`gcpu-${containerId}`} x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#6366f1" stopOpacity={0.3} />
+                    <stop offset="95%" stopColor="#6366f1" stopOpacity={0} />
+                  </linearGradient>
+                </defs>
+                <XAxis dataKey="time" tick={{ fontSize: 9, fill: 'var(--text-muted)' }} interval={tickInterval} tickLine={false} />
+                <YAxis domain={[0, 100]} tick={{ fontSize: 9, fill: 'var(--text-muted)' }} unit="%" tickLine={false} axisLine={false} />
+                <Tooltip contentStyle={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 6, fontSize: 11 }} formatter={(v: number) => `${v}%`} />
+                <Area type="monotone" dataKey="cpu" stroke="#6366f1" fill={`url(#gcpu-${containerId})`} strokeWidth={1.5} dot={false} />
+              </AreaChart>
+            </ResponsiveContainer>
+          </div>
+
+          {/* RAM */}
+          <div>
+            <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4 }}>RAM (MB)</div>
+            <ResponsiveContainer width="100%" height={100}>
+              <AreaChart data={cpuRamData} margin={{ top: 2, right: 2, bottom: 0, left: -20 }}>
+                <defs>
+                  <linearGradient id={`gram-${containerId}`} x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#22c55e" stopOpacity={0.3} />
+                    <stop offset="95%" stopColor="#22c55e" stopOpacity={0} />
+                  </linearGradient>
+                </defs>
+                <XAxis dataKey="time" tick={{ fontSize: 9, fill: 'var(--text-muted)' }} interval={tickInterval} tickLine={false} />
+                <YAxis tick={{ fontSize: 9, fill: 'var(--text-muted)' }} tickLine={false} axisLine={false} unit=" MB" />
+                <Tooltip contentStyle={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 6, fontSize: 11 }} formatter={(v: number) => `${v} MB`} />
+                <Area type="monotone" dataKey="ram" stroke="#22c55e" fill={`url(#gram-${containerId})`} strokeWidth={1.5} dot={false} />
+              </AreaChart>
+            </ResponsiveContainer>
+          </div>
+
+          {/* Network — only shown when data is available */}
+          {hasNet && (
+            <div>
+              <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4 }}>Network</div>
+              <ResponsiveContainer width="100%" height={100}>
+                <AreaChart data={netData} margin={{ top: 2, right: 2, bottom: 0, left: -20 }}>
+                  <defs>
+                    <linearGradient id={`grx-${containerId}`} x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="#06b6d4" stopOpacity={0.3} />
+                      <stop offset="95%" stopColor="#06b6d4" stopOpacity={0} />
+                    </linearGradient>
+                    <linearGradient id={`gtx-${containerId}`} x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="#f59e0b" stopOpacity={0.3} />
+                      <stop offset="95%" stopColor="#f59e0b" stopOpacity={0} />
+                    </linearGradient>
+                  </defs>
+                  <XAxis dataKey="time" tick={{ fontSize: 9, fill: 'var(--text-muted)' }} interval={tickInterval} tickLine={false} />
+                  <YAxis tick={{ fontSize: 9, fill: 'var(--text-muted)' }} tickLine={false} axisLine={false} tickFormatter={(v: number) => formatKbps(v)} width={50} />
+                  <Tooltip contentStyle={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 6, fontSize: 11 }} formatter={(v: number) => formatKbps(v)} />
+                  <Legend wrapperStyle={{ fontSize: 9 }} />
+                  <Area type="monotone" dataKey="rx" name="↓ Down" stroke="#06b6d4" fill={`url(#grx-${containerId})`} strokeWidth={1.5} dot={false} />
+                  <Area type="monotone" dataKey="tx" name="↑ Up" stroke="#f59e0b" fill={`url(#gtx-${containerId})`} strokeWidth={1.5} dot={false} />
+                </AreaChart>
+              </ResponsiveContainer>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Main Docker page ───────────────────────────────────────────────────────
+
 export function Docker() {
   const sse = useSSE();
-  const [sortField, setSortField] = useState<SortField>('status');
-  const [sortDir, setSortDir] = useState<SortDir>('desc');
-  const [runningOnly, setRunningOnly] = useState(false);
+  const savedPrefs = loadPrefs();
+  const [sortField, setSortField] = useState<SortField>(savedPrefs.sortField);
+  const [sortDir, setSortDir] = useState<SortDir>(savedPrefs.sortDir);
+  const [runningOnly, setRunningOnly] = useState(savedPrefs.runningOnly);
   const [logs, setLogs] = useState<{ name: string; text: string } | null>(null);
   const [actioning, setActioning] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [logsLoading, setLogsLoading] = useState<string | null>(null);
   const [statusOverrides, setStatusOverrides] = useState<Record<string, string>>({});
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+
+  // Persist prefs whenever they change
+  useEffect(() => {
+    savePrefs({ sortField, sortDir, runningOnly });
+  }, [sortField, sortDir, runningOnly]);
 
   function setSort(field: SortField) {
     if (field === sortField) {
-      // toggle direction, but "status" always desc
       setSortDir(d => d === 'desc' ? 'asc' : 'desc');
     } else {
       setSortField(field);
@@ -94,6 +251,10 @@ export function Docker() {
     }
   }
 
+  function toggleHistory(id: string) {
+    setExpandedId(prev => prev === id ? null : id);
+  }
+
   function SortBtn({ field, label }: { field: SortField; label: string }) {
     const active = sortField === field;
     const arrow = active ? (sortDir === 'desc' ? ' ↓' : ' ↑') : '';
@@ -131,9 +292,9 @@ export function Docker() {
           </div>
         )}
 
-        <div className="card">
+        <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
           {/* Toolbar */}
-          <div className="flex items-center gap-2 mb-4" style={{ borderBottom: '1px solid var(--border)', paddingBottom: 12, flexWrap: 'wrap' }}>
+          <div className="flex items-center gap-2" style={{ borderBottom: '1px solid var(--border)', padding: '12px 16px', flexWrap: 'wrap' }}>
             <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>Sort:</span>
             {SORT_OPTIONS.map(o => <SortBtn key={o.field} field={o.field} label={o.label} />)}
 
@@ -153,7 +314,7 @@ export function Docker() {
           </div>
 
           {containers.length === 0 ? (
-            <div className="empty-state">
+            <div className="empty-state" style={{ padding: '32px 16px' }}>
               <h3>{runningOnly ? 'No running containers' : 'No containers'}</h3>
               <p>{runningOnly ? 'All containers are stopped.' : 'No server connected or no containers found.'}</p>
             </div>
@@ -165,7 +326,9 @@ export function Docker() {
                   <th>Status</th>
                   <th style={{ width: 80 }}>CPU</th>
                   <th style={{ width: 90 }}>RAM</th>
-                  <th style={{ width: 120 }}>Actions</th>
+                  <th style={{ width: 110 }}>↓ Down</th>
+                  <th style={{ width: 110 }}>↑ Up</th>
+                  <th style={{ width: 150 }}>Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -174,49 +337,72 @@ export function Docker() {
                     actioning === `${c.id}-start` ? 'starting' :
                     actioning === `${c.id}-stop`  ? 'stopping' :
                     actioning === `${c.id}-restart` ? 'restarting' : null;
+                  const isExpanded = expandedId === c.id;
 
                   return (
-                  <tr key={c.id} style={{ opacity: c.status !== 'running' && !pending ? 0.6 : 1 }}>
-                    <td style={{ fontWeight: c.status === 'running' ? 500 : 400 }}>{c.name}</td>
-                    <td>
-                      {pending ? (
-                        <span className="badge" style={{ background: 'var(--bg-elevated)', color: 'var(--text-muted)', display: 'inline-flex', alignItems: 'center', gap: 5 }}>
-                          <Loader2 size={11} className="spin" />{pending}…
-                        </span>
-                      ) : (
-                        <span className={`badge badge-${c.status === 'running' ? 'running' : 'stopped'}`}>
-                          {c.status}
-                        </span>
+                    <Fragment key={c.id}>
+                      <tr style={{ opacity: c.status !== 'running' && !pending ? 0.6 : 1 }}>
+                        <td style={{ fontWeight: c.status === 'running' ? 500 : 400 }}>{c.name}</td>
+                        <td>
+                          {pending ? (
+                            <span className="badge" style={{ background: 'var(--bg-elevated)', color: 'var(--text-muted)', display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+                              <Loader2 size={11} className="spin" />{pending}…
+                            </span>
+                          ) : (
+                            <span className={`badge badge-${c.status === 'running' ? 'running' : 'stopped'}`}>
+                              {c.status}
+                            </span>
+                          )}
+                        </td>
+                        <td style={{ fontFamily: 'monospace', fontSize: 12 }}>{fmtNum(c.cpu_pct, '%')}</td>
+                        <td style={{ fontFamily: 'monospace', fontSize: 12 }}>{fmtNum(c.mem_mb, ' MB')}</td>
+                        <td style={{ fontFamily: 'monospace', fontSize: 12 }}>
+                          {c.net_rx_kbps > 0 ? <span style={{ color: '#06b6d4' }}>{formatKbps(c.net_rx_kbps)}</span> : <span style={{ color: 'var(--text-muted)' }}>—</span>}
+                        </td>
+                        <td style={{ fontFamily: 'monospace', fontSize: 12 }}>
+                          {c.net_tx_kbps > 0 ? <span style={{ color: '#f59e0b' }}>{formatKbps(c.net_tx_kbps)}</span> : <span style={{ color: 'var(--text-muted)' }}>—</span>}
+                        </td>
+                        <td>
+                          <div className="flex gap-2">
+                            <button className="btn-ghost" style={{ padding: '4px 8px' }} title="Start"
+                              onClick={() => void doAction(c.id, 'start')}
+                              disabled={actioning !== null || c.status === 'running'}>
+                              {actioning === `${c.id}-start` ? <Loader2 size={13} className="spin" /> : <Play size={13} />}
+                            </button>
+                            <button className="btn-ghost" style={{ padding: '4px 8px' }} title="Stop"
+                              onClick={() => void doAction(c.id, 'stop')}
+                              disabled={actioning !== null || c.status !== 'running'}>
+                              {actioning === `${c.id}-stop` ? <Loader2 size={13} className="spin" /> : <Square size={13} />}
+                            </button>
+                            <button className="btn-ghost" style={{ padding: '4px 8px' }} title="Restart"
+                              onClick={() => void doAction(c.id, 'restart')}
+                              disabled={actioning !== null || c.status !== 'running'}>
+                              {actioning === `${c.id}-restart` ? <Loader2 size={13} className="spin" /> : <RotateCcw size={13} />}
+                            </button>
+                            <button
+                              className="btn-ghost" style={{ padding: '4px 8px', color: logsLoading === c.id ? 'var(--accent)' : undefined }}
+                              title="View logs" disabled={logsLoading !== null}
+                              onClick={() => void viewLogs(c.id, c.name)}>
+                              <FileText size={13} />
+                            </button>
+                            <button
+                              className={isExpanded ? 'btn-primary' : 'btn-ghost'}
+                              style={{ padding: '4px 8px' }}
+                              title="History"
+                              onClick={() => toggleHistory(c.id)}>
+                              {isExpanded ? <ChevronUp size={13} /> : <BarChart2 size={13} />}
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                      {isExpanded && (
+                        <tr>
+                          <td colSpan={7} style={{ padding: 0 }}>
+                            <ContainerHistory containerId={c.id} />
+                          </td>
+                        </tr>
                       )}
-                    </td>
-                    <td style={{ fontFamily: 'monospace', fontSize: 12 }}>{fmt(c.cpu_pct, '%')}</td>
-                    <td style={{ fontFamily: 'monospace', fontSize: 12 }}>{fmt(c.mem_mb, ' MB')}</td>
-                    <td>
-                      <div className="flex gap-2">
-                        <button className="btn-ghost" style={{ padding: '4px 8px' }} title="Start"
-                          onClick={() => void doAction(c.id, 'start')}
-                          disabled={actioning !== null || c.status === 'running'}>
-                          {actioning === `${c.id}-start` ? <Loader2 size={13} className="spin" /> : <Play size={13} />}
-                        </button>
-                        <button className="btn-ghost" style={{ padding: '4px 8px' }} title="Stop"
-                          onClick={() => void doAction(c.id, 'stop')}
-                          disabled={actioning !== null || c.status !== 'running'}>
-                          {actioning === `${c.id}-stop` ? <Loader2 size={13} className="spin" /> : <Square size={13} />}
-                        </button>
-                        <button className="btn-ghost" style={{ padding: '4px 8px' }} title="Restart"
-                          onClick={() => void doAction(c.id, 'restart')}
-                          disabled={actioning !== null || c.status !== 'running'}>
-                          {actioning === `${c.id}-restart` ? <Loader2 size={13} className="spin" /> : <RotateCcw size={13} />}
-                        </button>
-                        <button
-                          className="btn-ghost" style={{ padding: '4px 8px', color: logsLoading === c.id ? 'var(--accent)' : undefined }}
-                          title="View logs" disabled={logsLoading !== null}
-                          onClick={() => void viewLogs(c.id, c.name)}>
-                          <FileText size={13} />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
+                    </Fragment>
                   );
                 })}
               </tbody>
