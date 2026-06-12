@@ -30,15 +30,52 @@ metrics.get('/history', async (c) => {
   const rows = await c.env.DB.prepare(`
     SELECT (ts / ?) * ? AS ts,
            ROUND(AVG(cpu_pct), 1) AS cpu_pct,
-           ROUND(AVG(ram_pct), 1) AS ram_pct
+           ROUND(AVG(ram_pct), 1) AS ram_pct,
+           ROUND(AVG(COALESCE(net_rx_kbps, 0)), 0) AS net_rx_kbps,
+           ROUND(AVG(COALESCE(net_tx_kbps, 0)), 0) AS net_tx_kbps
     FROM system_metrics
     WHERE server_id = ? AND ts > unixepoch() - ?
     GROUP BY (ts / ?)
     ORDER BY ts
   `).bind(bucket, bucket, serverRow.id, seconds, bucket)
-    .all<{ ts: number; cpu_pct: number; ram_pct: number }>();
+    .all<{ ts: number; cpu_pct: number; ram_pct: number; net_rx_kbps: number; net_tx_kbps: number }>();
 
   return c.json(rows.results);
+});
+
+metrics.get('/history/container/:id', async (c) => {
+  const user = c.get('user');
+  const containerId = c.req.param('id');
+  const window = c.req.query('window') ?? '1h';
+
+  if (!(window in WINDOWS)) return c.json({ error: 'Invalid window' }, 400);
+
+  const serverRow = await c.env.DB.prepare(
+    'SELECT id FROM servers WHERE user_id = ?'
+  ).bind(user.id).first<{ id: string }>();
+
+  if (!serverRow) return c.json({ error: 'No server configured' }, 404);
+
+  const { seconds, bucket } = WINDOWS[window as keyof typeof WINDOWS];
+
+  try {
+    const rows = await c.env.DB.prepare(`
+      SELECT (ts / ?) * ? AS ts,
+             ROUND(AVG(cpu_pct), 1) AS cpu_pct,
+             ROUND(AVG(mem_mb), 0) AS mem_mb,
+             ROUND(AVG(COALESCE(net_rx_kbps, 0)), 0) AS net_rx_kbps,
+             ROUND(AVG(COALESCE(net_tx_kbps, 0)), 0) AS net_tx_kbps
+      FROM container_metrics
+      WHERE server_id = ? AND container_id = ? AND ts > unixepoch() - ?
+      GROUP BY (ts / ?)
+      ORDER BY ts
+    `).bind(bucket, bucket, serverRow.id, containerId, seconds, bucket)
+      .all<{ ts: number; cpu_pct: number; mem_mb: number; net_rx_kbps: number; net_tx_kbps: number }>();
+
+    return c.json(rows.results);
+  } catch {
+    return c.json([]);
+  }
 });
 
 export default metrics;

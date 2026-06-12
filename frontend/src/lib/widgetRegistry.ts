@@ -1,6 +1,7 @@
 export type WidgetId =
   | 'stats-cards'
   | 'cpu-ram-chart'
+  | 'network-chart'
   | 'docker-overview'
   | 'ups-status'
   | 'docker-monitor-status'
@@ -25,6 +26,7 @@ export interface WidgetConfig {
 export const WIDGET_REGISTRY: Record<WidgetId, WidgetMeta> = {
   'stats-cards':           { id: 'stats-cards',           label: 'Stats Cards',           description: 'CPU, RAM, Temp, Uptime',          defaultWidth: 'full' },
   'cpu-ram-chart':         { id: 'cpu-ram-chart',         label: 'CPU / RAM Chart',       description: 'Real-time area chart',             defaultWidth: 'full' },
+  'network-chart':         { id: 'network-chart',         label: 'Network Chart',         description: 'System network throughput',        defaultWidth: 'full' },
   'docker-overview':       { id: 'docker-overview',       label: 'Docker Overview',       description: 'Running / stopped containers',     defaultWidth: 'half' },
   'ups-status':            { id: 'ups-status',            label: 'UPS Status',            description: 'UPS battery, runtime, load',       defaultWidth: 'half' },
   'docker-monitor-status': { id: 'docker-monitor-status', label: 'Docker Monitor',        description: 'Watched container states',         defaultWidth: 'half' },

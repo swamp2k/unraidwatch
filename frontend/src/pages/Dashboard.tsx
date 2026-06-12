@@ -23,6 +23,7 @@ import { type WidgetConfig, WIDGET_REGISTRY, DEFAULT_LAYOUT, mergeWithRegistry }
 import { SortableWidget } from '../components/widgets/SortableWidget';
 import { StatsCards } from '../components/widgets/StatsCards';
 import { CpuRamChart } from '../components/widgets/CpuRamChart';
+import { NetworkChart } from '../components/widgets/NetworkChart';
 import { DockerOverview } from '../components/widgets/DockerOverview';
 import { UpsStatus } from '../components/widgets/UpsStatus';
 import { DockerMonitorStatus } from '../components/widgets/DockerMonitorStatus';
@@ -32,15 +33,18 @@ import { SharesOverview } from '../components/widgets/SharesOverview';
 import { RecentAlerts } from '../components/widgets/RecentAlerts';
 
 interface ChartPoint { time: string; cpu: number; ram: number; temp: number }
+interface NetPoint   { time: string; rx: number; tx: number }
 
-function WidgetRenderer({ id, sse, history }: {
+function WidgetRenderer({ id, sse, history, netHistory }: {
   id: string;
   sse: ReturnType<typeof useSSE>;
   history: ChartPoint[];
+  netHistory: NetPoint[];
 }) {
   switch (id) {
     case 'stats-cards':           return <StatsCards stats={sse.stats} />;
     case 'cpu-ram-chart':         return <CpuRamChart history={history} />;
+    case 'network-chart':         return <NetworkChart liveHistory={netHistory} />;
     case 'docker-overview':       return <DockerOverview containers={sse.docker} />;
     case 'ups-status':            return <UpsStatus ups={sse.ups} />;
     case 'docker-monitor-status': return <DockerMonitorStatus />;
@@ -56,6 +60,7 @@ export function Dashboard() {
   const qc = useQueryClient();
   const sse = useSSE();
   const [history, setHistory] = useState<ChartPoint[]>([]);
+  const [netHistory, setNetHistory] = useState<NetPoint[]>([]);
   const historyRef = useRef(history);
   historyRef.current = history;
   const [editMode, setEditMode] = useState(false);
@@ -64,6 +69,7 @@ export function Dashboard() {
     if (!sse.stats) return;
     const now = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
     setHistory(h => [...h.slice(-359), { time: now, cpu: sse.stats!.cpu_pct, ram: sse.stats!.ram_pct, temp: sse.stats!.temp_avg }]);
+    setNetHistory(h => [...h.slice(-359), { time: now, rx: sse.stats!.net_rx_kbps ?? 0, tx: sse.stats!.net_tx_kbps ?? 0 }]);
   }, [sse.stats]);
 
   const { data: savedLayout } = useQuery<WidgetConfig[]>({
@@ -181,7 +187,7 @@ export function Dashboard() {
                       </div>
                     </div>
                   ) : (
-                    <WidgetRenderer id={w.id} sse={sse} history={history} />
+                    <WidgetRenderer id={w.id} sse={sse} history={history} netHistory={netHistory} />
                   )}
                 </SortableWidget>
               ))}
