@@ -3,7 +3,7 @@ import { TopBar } from '../components/layout/TopBar';
 import { useSSE } from '../hooks/useSSE';
 import { api } from '../lib/api';
 import { useQuery } from '@tanstack/react-query';
-import { Play, Square, RotateCcw, FileText, X, Loader2, BarChart2, ChevronDown, ChevronUp } from 'lucide-react';
+import { Play, Square, RotateCcw, FileText, X, Loader2, BarChart2, ChevronUp } from 'lucide-react';
 import { API_BASE } from '../lib/api';
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend } from 'recharts';
 import { formatKbps } from '../lib/format';
