@@ -128,31 +128,27 @@ export async function getNetworkStats(url: string, apiKey: string): Promise<{ rx
       query {
         metrics {
           network {
-            interfaces {
-              name
-              rxBytesPerSec
-              txBytesPerSec
-            }
+            name
+            rxSec
+            txSec
           }
         }
       }
     `) as {
       metrics: {
-        network: {
-          interfaces: Array<{ name: string; rxBytesPerSec: number; txBytesPerSec: number }>;
-        } | null;
+        network: Array<{ name: string; rxSec: number; txSec: number }> | null;
       };
     };
 
-    const ifaces = data?.metrics?.network?.interfaces;
+    const ifaces = data?.metrics?.network;
     if (!ifaces?.length) return null;
 
-    // Sum across all interfaces, exclude loopback
+    // Sum across all interfaces, exclude loopback and virtual interfaces
     let rx = 0, tx = 0;
     for (const iface of ifaces) {
       if (iface.name === 'lo') continue;
-      rx += iface.rxBytesPerSec ?? 0;
-      tx += iface.txBytesPerSec ?? 0;
+      rx += iface.rxSec ?? 0;
+      tx += iface.txSec ?? 0;
     }
     return {
       rx_kbps: Math.round(rx / 1000),
