@@ -20,6 +20,15 @@ import settingsRoutes from './routes/settings';
 
 const app = new Hono<{ Bindings: Env }>();
 
+app.onError((err, c) => {
+  const origin = c.req.header('Origin') ?? '';
+  const allowed = c.env?.APP_URL ?? '';
+  const res = c.json({ error: 'Internal server error' }, 500);
+  res.headers.set('Access-Control-Allow-Origin', origin === allowed ? origin : allowed);
+  res.headers.set('Access-Control-Allow-Credentials', 'true');
+  return res;
+});
+
 app.use('*', corsMiddleware);
 
 app.route('/api/auth', authRoutes);

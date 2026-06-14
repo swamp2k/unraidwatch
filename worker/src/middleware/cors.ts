@@ -17,9 +17,10 @@ export const corsMiddleware = createMiddleware<{ Bindings: Env }>(async (c, next
     });
   }
 
-  await next();
-
-  c.res.headers.set('Access-Control-Allow-Origin', origin === allowed ? origin : allowed);
-  c.res.headers.set('Access-Control-Allow-Credentials', 'true');
-  return;
+  try {
+    await next();
+  } finally {
+    c.res.headers.set('Access-Control-Allow-Origin', origin === allowed ? origin : allowed);
+    c.res.headers.set('Access-Control-Allow-Credentials', 'true');
+  }
 });
