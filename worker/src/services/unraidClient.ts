@@ -340,12 +340,43 @@ export function startContainerStatsWs(
   signal: AbortSignal,
 ): void {
   const wsUrl = url.replace(/^http/, 'ws') + '/graphql';
+  const STATS_QUERY = 'subscription { dockerContainerStats { id cpuPercent memUsage networkRxBytes networkTxBytes } }';
+
+  function handleStat(s: { id: string; cpuPercent: number; memUsage: string; networkRxBytes?: number; networkTxBytes?: number }) {
+    const prev = cache.get(s.id);
+    const now = Date.now();
+    let netRxKbps = 0;
+    let netTxKbps = 0;
+    if (
+      s.networkRxBytes !== undefined &&
+      s.networkTxBytes !== undefined &&
+      prev?._prevRxBytes !== undefined &&
+      prev._prevTxBytes !== undefined &&
+      prev._prevTs !== undefined
+    ) {
+      const elapsed = (now - prev._prevTs) / 1000;
+      if (elapsed > 0) {
+        netRxKbps = Math.max(0, Math.round((s.networkRxBytes - prev._prevRxBytes) / elapsed / 1000));
+        netTxKbps = Math.max(0, Math.round((s.networkTxBytes - prev._prevTxBytes) / elapsed / 1000));
+      }
+    }
+    cache.set(s.id, {
+      cpu: Math.round(s.cpuPercent * 10) / 10,
+      memMb: parseMemMb(s.memUsage),
+      netRxKbps,
+      netTxKbps,
+      _prevRxBytes: s.networkRxBytes,
+      _prevTxBytes: s.networkTxBytes,
+      _prevTs: now,
+    });
+  }
 
   async function run(): Promise<void> {
     while (!signal.aborted) {
       try {
         await new Promise<void>((resolve) => {
-          const ws = new WebSocket(wsUrl, ['graphql-transport-ws']);
+          // Offer both protocols; the server will select one
+          const ws = new WebSocket(wsUrl, ['graphql-transport-ws', 'graphql-ws']);
 
           signal.addEventListener('abort', () => { ws.close(1000, 'done'); resolve(); }, { once: true });
           ws.addEventListener('close', () => resolve());
@@ -359,56 +390,22 @@ export function startContainerStatsWs(
             try {
               const msg = JSON.parse(evt.data as string) as {
                 type: string;
-                payload?: {
-                  data?: {
-                    dockerContainerStats?: {
-                      id: string;
-                      cpuPercent: number;
-                      memUsage: string;
-                      networkRxBytes?: number;
-                      networkTxBytes?: number;
-                    };
-                  };
-                };
+                id?: string;
+                payload?: { data?: { dockerContainerStats?: { id: string; cpuPercent: number; memUsage: string; networkRxBytes?: number; networkTxBytes?: number } } };
               };
+
               if (msg.type === 'connection_ack') {
+                // graphql-transport-ws uses 'subscribe'; graphql-ws (older) uses 'start'
+                const isNewProtocol = ws.protocol === 'graphql-transport-ws';
                 ws.send(JSON.stringify({
-                  id: '1', type: 'subscribe',
-                  payload: { query: 'subscription { dockerContainerStats { id cpuPercent memUsage networkRxBytes networkTxBytes } }' },
+                  id: '1',
+                  type: isNewProtocol ? 'subscribe' : 'start',
+                  payload: { query: STATS_QUERY },
                 }));
-              } else if (msg.type === 'next') {
+              } else if (msg.type === 'next' || msg.type === 'data') {
+                // 'next' = graphql-transport-ws, 'data' = graphql-ws
                 const s = msg.payload?.data?.dockerContainerStats;
-                if (s) {
-                  const prev = cache.get(s.id);
-                  const now = Date.now();
-                  let netRxKbps = 0;
-                  let netTxKbps = 0;
-
-                  // Calculate network rate from cumulative byte counters
-                  if (
-                    s.networkRxBytes !== undefined &&
-                    s.networkTxBytes !== undefined &&
-                    prev?._prevRxBytes !== undefined &&
-                    prev._prevTxBytes !== undefined &&
-                    prev._prevTs !== undefined
-                  ) {
-                    const elapsed = (now - prev._prevTs) / 1000;
-                    if (elapsed > 0) {
-                      netRxKbps = Math.max(0, Math.round((s.networkRxBytes - prev._prevRxBytes) / elapsed / 1000));
-                      netTxKbps = Math.max(0, Math.round((s.networkTxBytes - prev._prevTxBytes) / elapsed / 1000));
-                    }
-                  }
-
-                  cache.set(s.id, {
-                    cpu: Math.round(s.cpuPercent * 10) / 10,
-                    memMb: parseMemMb(s.memUsage),
-                    netRxKbps,
-                    netTxKbps,
-                    _prevRxBytes: s.networkRxBytes,
-                    _prevTxBytes: s.networkTxBytes,
-                    _prevTs: now,
-                  });
-                }
+                if (s) handleStat(s);
               }
             } catch { /* ignore parse errors */ }
           });
