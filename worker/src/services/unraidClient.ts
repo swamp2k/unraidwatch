@@ -364,7 +364,9 @@ export function startContainerStatsWs(
   cache: Map<string, ContainerStatEntry>,
   signal: AbortSignal,
 ): void {
-  const wsUrl = url.replace(/^http/, 'ws') + '/graphql';
+  // Workers open outbound WebSockets via fetch()+Upgrade, which requires the
+  // original http(s):// scheme — fetch() throws on ws://wss:// URLs.
+  const wsUrl = url.replace(/\/$/, '') + '/graphql';
   const STATS_QUERY = 'subscription { dockerContainerStats { id cpuPercent memUsage netIO } }';
 
   type StatMsg = { id: string; cpuPercent: number; memUsage: string; netIO?: string };
@@ -373,6 +375,11 @@ export function startContainerStatsWs(
     const prev = cache.get(s.id);
     const now = Date.now();
     const { rx, tx } = parseNetIO(s.netIO ?? '');
+    // Net rate is a byte-delta between two pushes. Note that Unraid's
+    // dockerContainerStats often replays duplicate snapshot frames back-to-back
+    // and reports netIO coarsely rounded (~0.1MB), so over a short sampling
+    // window this frequently stays 0 for low-traffic containers. CPU/mem are
+    // absolute per-frame and are unaffected.
     let netRxKbps = 0;
     let netTxKbps = 0;
     if (
