@@ -2,6 +2,7 @@ import type { Env, DockerMonitor, UserRow } from '../types';
 import { decrypt } from './encryption';
 import { getContainers, containerAction } from './unraidClient';
 import { sendEmail } from './emailService';
+import { sendPushToUser } from './webPush';
 
 export async function evaluateDockerMonitors(user: UserRow, env: Env): Promise<void> {
   try {
@@ -79,6 +80,16 @@ export async function evaluateDockerMonitors(user: UserRow, env: Env): Promise<v
           `[UnraidWatch] Container Down: ${monitor.container_name}`,
           `Container "${monitor.container_name}" is ${currentStatus}.\n\nConfigured action: ${monitor.action_type ?? 'none'}\n\nView your dashboard: ${env.APP_URL}`,
         );
+      }
+
+      if (monitor.notify_email && user.push_alerts) {
+        actionsTaken.push('push');
+        await sendPushToUser(env, user.id, {
+          title: `🔴 Container Down: ${monitor.container_name}`,
+          body: `Status: ${currentStatus}${monitor.action_type ? ` — running ${monitor.action_type}` : ''}`,
+          url: '/monitors/docker',
+          tag: `docker-${monitor.id}`,
+        });
       }
 
       if (monitor.notify_action && monitor.action_type) {

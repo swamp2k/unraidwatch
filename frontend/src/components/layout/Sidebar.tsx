@@ -1,6 +1,8 @@
+import { useEffect } from 'react';
 import { NavLink } from 'react-router-dom';
 import { LayoutDashboard, Box, Monitor, HardDrive, Zap, BrainCircuit, Search, Bell, Settings, ShieldCheck, LogOut, Activity, ScrollText } from 'lucide-react';
 import { useAuth } from '../../hooks/useAuth';
+import { useUIStore } from '../../hooks/useUI';
 
 const navItems = [
   { to: '/', label: 'Dashboard', icon: LayoutDashboard },
@@ -18,33 +20,55 @@ const navItems = [
 
 export function Sidebar() {
   const { user, logout } = useAuth();
+  const { navOpen, closeNav } = useUIStore();
+
+  // Close on Escape and lock body scroll while the drawer is open.
+  useEffect(() => {
+    if (!navOpen) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') closeNav(); };
+    window.addEventListener('keydown', onKey);
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      document.body.style.overflow = prev;
+    };
+  }, [navOpen, closeNav]);
 
   return (
-    <nav className="sidebar">
-      <div className="sidebar-logo">UnraidWatch</div>
-      {navItems.map(({ to, label, icon: Icon }) => (
-        <NavLink
-          key={to}
-          to={to}
-          end={to === '/'}
-          className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`}
-        >
-          <Icon size={16} />
-          {label}
-        </NavLink>
-      ))}
-      {user?.role === 'admin' && (
-        <NavLink to="/admin/invites" className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`}>
-          <ShieldCheck size={16} />
-          Admin
-        </NavLink>
-      )}
-      <div style={{ marginTop: 'auto', padding: '0 8px' }}>
-        <button className="nav-item w-full" onClick={() => void logout()} style={{ color: 'var(--danger)' }}>
-          <LogOut size={16} />
-          Sign out
-        </button>
-      </div>
-    </nav>
+    <>
+      <div
+        className={`sidebar-overlay${navOpen ? ' open' : ''}`}
+        onClick={closeNav}
+        aria-hidden="true"
+      />
+      <nav className={`sidebar${navOpen ? ' open' : ''}`}>
+        <div className="sidebar-logo">UnraidWatch</div>
+        {navItems.map(({ to, label, icon: Icon }) => (
+          <NavLink
+            key={to}
+            to={to}
+            end={to === '/'}
+            onClick={closeNav}
+            className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`}
+          >
+            <Icon size={16} />
+            {label}
+          </NavLink>
+        ))}
+        {user?.role === 'admin' && (
+          <NavLink to="/admin/invites" onClick={closeNav} className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`}>
+            <ShieldCheck size={16} />
+            Admin
+          </NavLink>
+        )}
+        <div style={{ marginTop: 'auto', padding: '0 8px' }}>
+          <button className="nav-item w-full" onClick={() => void logout()} style={{ color: 'var(--danger)' }}>
+            <LogOut size={16} />
+            Sign out
+          </button>
+        </div>
+      </nav>
+    </>
   );
 }

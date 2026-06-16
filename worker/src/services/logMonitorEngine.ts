@@ -2,6 +2,7 @@ import type { Env, LogMonitor, UserRow } from '../types';
 import { decrypt } from './encryption';
 import { getSyslog, getContainerLogs, containerAction } from './unraidClient';
 import { sendEmail } from './emailService';
+import { sendPushToUser } from './webPush';
 import { filterSyslogSinceCursor } from '../lib/syslogUtils';
 
 export async function evaluateLogMonitors(user: UserRow, env: Env): Promise<void> {
@@ -103,15 +104,26 @@ export async function evaluateLogMonitors(user: UserRow, env: Env): Promise<void
         );
       }
 
+      const sourceLabel = monitor.source_label ?? monitor.source_type;
+
       if (monitor.notify_email && user.email_alerts) {
         actionsTaken.push('email');
-        const sourceLabel = monitor.source_label ?? monitor.source_type;
         await sendEmail(
           env,
           user.email,
           `[UnraidWatch] Log Match: ${monitor.name}`,
           `Log monitor "${monitor.name}" triggered.\n\nSource: ${sourceLabel}\nKeyword: "${firstMatch.keyword}"\nMatched line:\n${firstMatch.line}\n\nTotal matches: ${matches.length}\n\nView your dashboard: ${env.APP_URL}`,
         );
+      }
+
+      if (monitor.notify_email && user.push_alerts) {
+        actionsTaken.push('push');
+        await sendPushToUser(env, user.id, {
+          title: `📜 Log Match: ${monitor.name}`,
+          body: `"${firstMatch.keyword}" in ${sourceLabel} (${matches.length} match${matches.length === 1 ? '' : 'es'})`,
+          url: '/monitors/log',
+          tag: `log-${monitor.id}`,
+        });
       }
 
       if (monitor.notify_action && monitor.action_type && monitor.action_container_id) {

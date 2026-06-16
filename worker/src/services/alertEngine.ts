@@ -2,6 +2,7 @@ import type { Env, AlertRule, UserRow } from '../types';
 import { decrypt } from './encryption';
 import { getStats, getContainers, getUPS } from './unraidClient';
 import { sendAlertEmail } from './emailService';
+import { sendPushToUser } from './webPush';
 
 function evaluate(rule: AlertRule, value: number | string): boolean {
   const numVal = typeof value === 'number' ? value : parseFloat(value as string);
@@ -56,6 +57,15 @@ export async function evaluateAlerts(user: UserRow, env: Env): Promise<void> {
 
     if (user.email_alerts) {
       await sendAlertEmail(env, user.email, rule.name, rule.metric, String(value), severity);
+    }
+
+    if (user.push_alerts) {
+      await sendPushToUser(env, user.id, {
+        title: `${severity === 'critical' ? '🔴' : '🟠'} ${rule.name}`,
+        body: `${rule.metric} = ${value}`,
+        url: '/alerts',
+        tag: `alert-${rule.id}`,
+      });
     }
   }
 }

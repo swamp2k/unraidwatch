@@ -2,7 +2,15 @@ import { useState, FormEvent, useEffect } from 'react';
 import { Routes, Route, NavLink } from 'react-router-dom';
 import { TopBar } from '../components/layout/TopBar';
 import { api } from '../lib/api';
-import { useQuery, useMutation } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import {
+  pushSupported,
+  notificationPermission,
+  getExistingSubscription,
+  subscribeToPush,
+  unsubscribeFromPush,
+  sendTestPush,
+} from '../lib/push';
 
 function ServerConfig() {
   const { data } = useQuery<{ label: string; url: string; verified_at: number | null } | null>({
@@ -199,10 +207,187 @@ function RetentionRow({ label, sublabel, value, onChange }: {
   );
 }
 
+interface NotificationPrefs {
+  email_alerts: boolean;
+  push_alerts: boolean;
+  alert_min_severity: string;
+}
+
+function NotificationConfig() {
+  const qc = useQueryClient();
+  const { data } = useQuery<NotificationPrefs>({
+    queryKey: ['notification-prefs'],
+    queryFn: () => api.get('/api/settings/notifications'),
+  });
+
+  const [emailAlerts, setEmailAlerts] = useState(true);
+  const [pushAlerts, setPushAlerts]   = useState(false);
+  const [severity, setSeverity]       = useState('warning');
+  const [msg, setMsg]                 = useState('');
+
+  // Device subscription state
+  const supported = pushSupported();
+  const [subscribed, setSubscribed] = useState(false);
+  const [permission, setPermission] = useState<NotificationPermission>(supported ? notificationPermission() : 'denied');
+  const [busy, setBusy]             = useState(false);
+  const [deviceMsg, setDeviceMsg]   = useState('');
+  const [deviceErr, setDeviceErr]   = useState(false);
+
+  useEffect(() => {
+    if (data) {
+      setEmailAlerts(data.email_alerts);
+      setPushAlerts(data.push_alerts);
+      setSeverity(data.alert_min_severity);
+    }
+  }, [data]);
+
+  useEffect(() => {
+    if (!supported) return;
+    void getExistingSubscription().then(sub => setSubscribed(!!sub));
+  }, [supported]);
+
+  const save = useMutation({
+    mutationFn: (prefs: Partial<NotificationPrefs>) =>
+      api.put('/api/settings/notifications', {
+        email_alerts: emailAlerts,
+        push_alerts: pushAlerts,
+        alert_min_severity: severity,
+        ...prefs,
+      }),
+    onSuccess: () => {
+      setMsg('Saved.');
+      void qc.invalidateQueries({ queryKey: ['notification-prefs'] });
+    },
+  });
+
+  function devOk(s: string)  { setDeviceMsg(s); setDeviceErr(false); }
+  function devErr(s: string) { setDeviceMsg(s); setDeviceErr(true); }
+
+  async function enableDevice() {
+    setBusy(true);
+    setDeviceMsg('');
+    try {
+      await subscribeToPush();
+      setSubscribed(true);
+      setPermission(notificationPermission());
+      // Turn on the push preference too, so alerts actually get delivered.
+      setPushAlerts(true);
+      save.mutate({ push_alerts: true });
+      devOk('This device will now receive notifications.');
+    } catch (e) {
+      devErr(e instanceof Error ? e.message : 'Failed to enable notifications.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function disableDevice() {
+    setBusy(true);
+    setDeviceMsg('');
+    try {
+      await unsubscribeFromPush();
+      setSubscribed(false);
+      devOk('This device will no longer receive notifications.');
+    } catch (e) {
+      devErr(e instanceof Error ? e.message : 'Failed to disable notifications.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function test() {
+    setBusy(true);
+    setDeviceMsg('');
+    try {
+      await sendTestPush();
+      devOk('Test notification sent. It should appear shortly.');
+    } catch (e) {
+      devErr(e instanceof Error ? e.message : 'Failed to send test.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="card" style={{ maxWidth: 520 }}>
+      <h3 style={{ fontWeight: 600, marginBottom: 4 }}>Notifications</h3>
+      <p style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 20 }}>
+        Get alerted when monitors fire or alert rules trip — by email, or as push notifications on your phone.
+      </p>
+
+      {/* Per-device push */}
+      <div style={{ marginBottom: 24, paddingBottom: 20, borderBottom: '1px solid var(--border)' }}>
+        <div style={{ fontWeight: 500, fontSize: 14, marginBottom: 6 }}>Push on this device</div>
+        {!supported ? (
+          <p style={{ fontSize: 13, color: 'var(--text-muted)' }}>
+            This browser doesn't support push notifications. On iPhone/iPad, first add UnraidWatch to your
+            Home Screen, then open it from there to enable notifications.
+          </p>
+        ) : permission === 'denied' && !subscribed ? (
+          <p style={{ fontSize: 13, color: 'var(--warning)' }}>
+            Notifications are blocked in your browser settings. Re-enable them for this site, then reload.
+          </p>
+        ) : (
+          <>
+            <p style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 12 }}>
+              {subscribed
+                ? 'This device is registered for push notifications.'
+                : 'Register this device to receive push notifications.'}
+            </p>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              {subscribed ? (
+                <button type="button" className="btn-ghost" onClick={() => void disableDevice()} disabled={busy}>
+                  {busy ? 'Working…' : 'Disable on this device'}
+                </button>
+              ) : (
+                <button type="button" className="btn-primary" onClick={() => void enableDevice()} disabled={busy}>
+                  {busy ? 'Working…' : 'Enable on this device'}
+                </button>
+              )}
+              {subscribed && (
+                <button type="button" className="btn-ghost" onClick={() => void test()} disabled={busy}>
+                  Send test
+                </button>
+              )}
+            </div>
+          </>
+        )}
+        {deviceMsg && (
+          <p style={{ color: deviceErr ? 'var(--danger)' : 'var(--success)', fontSize: 13, marginTop: 12 }}>{deviceMsg}</p>
+        )}
+      </div>
+
+      {/* Delivery preferences */}
+      <form onSubmit={(e: FormEvent) => { e.preventDefault(); save.mutate({}); }}>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 10, textTransform: 'none', letterSpacing: 0, fontSize: 14, marginBottom: 14, cursor: 'pointer' }}>
+          <input type="checkbox" style={{ width: 'auto' }} checked={pushAlerts} onChange={e => setPushAlerts(e.target.checked)} />
+          Send push notifications
+        </label>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 10, textTransform: 'none', letterSpacing: 0, fontSize: 14, marginBottom: 14, cursor: 'pointer' }}>
+          <input type="checkbox" style={{ width: 'auto' }} checked={emailAlerts} onChange={e => setEmailAlerts(e.target.checked)} />
+          Send email notifications
+        </label>
+        <div className="form-row">
+          <label>Minimum severity</label>
+          <select value={severity} onChange={e => setSeverity(e.target.value)}>
+            <option value="warning">Warning &amp; above</option>
+            <option value="critical">Critical only</option>
+          </select>
+        </div>
+        {msg && <p style={{ color: 'var(--success)', fontSize: 13, marginBottom: 8 }}>{msg}</p>}
+        <div className="form-actions">
+          <button type="submit" className="btn-primary" disabled={save.isPending}>{save.isPending ? 'Saving…' : 'Save'}</button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
 const settingsTabs = [
-  { to: '/settings/server',    label: 'Server' },
-  { to: '/settings/ai',        label: 'AI Provider' },
-  { to: '/settings/retention', label: 'Retention' },
+  { to: '/settings/server',        label: 'Server' },
+  { to: '/settings/ai',            label: 'AI Provider' },
+  { to: '/settings/notifications', label: 'Notifications' },
+  { to: '/settings/retention',     label: 'Retention' },
 ];
 
 export function Settings() {
@@ -218,10 +403,11 @@ export function Settings() {
           ))}
         </div>
         <Routes>
-          <Route path="server"    element={<ServerConfig />} />
-          <Route path="ai"        element={<AIConfig />} />
-          <Route path="retention" element={<RetentionConfig />} />
-          <Route path="*"         element={<ServerConfig />} />
+          <Route path="server"        element={<ServerConfig />} />
+          <Route path="ai"            element={<AIConfig />} />
+          <Route path="notifications" element={<NotificationConfig />} />
+          <Route path="retention"     element={<RetentionConfig />} />
+          <Route path="*"             element={<ServerConfig />} />
         </Routes>
       </div>
     </>

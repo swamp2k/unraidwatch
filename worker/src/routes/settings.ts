@@ -49,4 +49,37 @@ settings.put('/retention', async (c) => {
   return c.json({ ok: true });
 });
 
+settings.get('/notifications', async (c) => {
+  const user = c.get('user');
+  try {
+    const row = await c.env.DB.prepare(
+      'SELECT email_alerts, push_alerts, alert_min_severity FROM notification_prefs WHERE user_id = ?'
+    ).bind(user.id).first<{ email_alerts: number; push_alerts: number; alert_min_severity: string }>();
+    return c.json({
+      email_alerts: row?.email_alerts ?? 1,
+      push_alerts: row?.push_alerts ?? 0,
+      alert_min_severity: row?.alert_min_severity ?? 'warning',
+    });
+  } catch {
+    return c.json({ email_alerts: 1, push_alerts: 0, alert_min_severity: 'warning' });
+  }
+});
+
+settings.put('/notifications', async (c) => {
+  const user = c.get('user');
+  const body = await c.req.json<{ email_alerts?: boolean; push_alerts?: boolean; alert_min_severity?: string }>();
+  const email = body.email_alerts ? 1 : 0;
+  const push = body.push_alerts ? 1 : 0;
+  const severity = body.alert_min_severity === 'critical' ? 'critical' : 'warning';
+  await c.env.DB.prepare(
+    `INSERT INTO notification_prefs (user_id, email_alerts, push_alerts, alert_min_severity)
+     VALUES (?, ?, ?, ?)
+     ON CONFLICT(user_id) DO UPDATE SET
+       email_alerts = excluded.email_alerts,
+       push_alerts = excluded.push_alerts,
+       alert_min_severity = excluded.alert_min_severity`
+  ).bind(user.id, email, push, severity).run();
+  return c.json({ ok: true });
+});
+
 export default settings;
