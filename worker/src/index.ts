@@ -14,6 +14,7 @@ import detectiveRoutes from './routes/detective';
 import { evaluateAlerts } from './services/alertEngine';
 import { evaluateDockerMonitors } from './services/dockerMonitorEngine';
 import { evaluateLogMonitors } from './services/logMonitorEngine';
+import { collectMetrics } from './services/metricsCollector';
 import monitorRoutes from './routes/monitors';
 import metricsRoutes from './routes/metrics';
 import settingsRoutes from './routes/settings';
@@ -67,6 +68,7 @@ export default {
       for (const user of users.results) {
         ctx.waitUntil(evaluateDockerMonitors(user, env));
         ctx.waitUntil(evaluateLogMonitors(user, env));
+        ctx.waitUntil(collectMetrics(user, env));
       }
       return;
     }

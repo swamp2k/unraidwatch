@@ -333,6 +333,31 @@ function parseMemMb(raw: string): number {
   }
 }
 
+// Parse a byte size like "1.2MB" or "512KiB" into raw bytes.
+function parseBytes(raw: string): number {
+  const m = raw.trim().match(/([\d.]+)\s*([KMGT]?i?B)/i);
+  if (!m) return 0;
+  const v = parseFloat(m[1]!);
+  switch (m[2]!.toLowerCase()) {
+    case 'b':   return v;
+    case 'kb':  return v * 1e3;
+    case 'kib': return v * 1024;
+    case 'mb':  return v * 1e6;
+    case 'mib': return v * 1024 ** 2;
+    case 'gb':  return v * 1e9;
+    case 'gib': return v * 1024 ** 3;
+    case 'tb':  return v * 1e12;
+    case 'tib': return v * 1024 ** 4;
+    default:    return v;
+  }
+}
+
+// dockerContainerStats.netIO is a cumulative "rx / tx" string, e.g. "1.2MB / 3.4MB".
+function parseNetIO(raw: string): { rx: number; tx: number } {
+  const parts = raw.split('/');
+  return { rx: parseBytes(parts[0] ?? ''), tx: parseBytes(parts[1] ?? '') };
+}
+
 export function startContainerStatsWs(
   url: string,
   apiKey: string,
@@ -340,24 +365,25 @@ export function startContainerStatsWs(
   signal: AbortSignal,
 ): void {
   const wsUrl = url.replace(/^http/, 'ws') + '/graphql';
-  const STATS_QUERY = 'subscription { dockerContainerStats { id cpuPercent memUsage networkRxBytes networkTxBytes } }';
+  const STATS_QUERY = 'subscription { dockerContainerStats { id cpuPercent memUsage netIO } }';
 
-  function handleStat(s: { id: string; cpuPercent: number; memUsage: string; networkRxBytes?: number; networkTxBytes?: number }) {
+  type StatMsg = { id: string; cpuPercent: number; memUsage: string; netIO?: string };
+
+  function handleStat(s: StatMsg) {
     const prev = cache.get(s.id);
     const now = Date.now();
+    const { rx, tx } = parseNetIO(s.netIO ?? '');
     let netRxKbps = 0;
     let netTxKbps = 0;
     if (
-      s.networkRxBytes !== undefined &&
-      s.networkTxBytes !== undefined &&
       prev?._prevRxBytes !== undefined &&
       prev._prevTxBytes !== undefined &&
       prev._prevTs !== undefined
     ) {
       const elapsed = (now - prev._prevTs) / 1000;
       if (elapsed > 0) {
-        netRxKbps = Math.max(0, Math.round((s.networkRxBytes - prev._prevRxBytes) / elapsed / 1000));
-        netTxKbps = Math.max(0, Math.round((s.networkTxBytes - prev._prevTxBytes) / elapsed / 1000));
+        netRxKbps = Math.max(0, Math.round((rx - prev._prevRxBytes) / elapsed / 1000));
+        netTxKbps = Math.max(0, Math.round((tx - prev._prevTxBytes) / elapsed / 1000));
       }
     }
     cache.set(s.id, {
@@ -365,53 +391,76 @@ export function startContainerStatsWs(
       memMb: parseMemMb(s.memUsage),
       netRxKbps,
       netTxKbps,
-      _prevRxBytes: s.networkRxBytes,
-      _prevTxBytes: s.networkTxBytes,
+      _prevRxBytes: rx,
+      _prevTxBytes: tx,
       _prevTs: now,
+    });
+  }
+
+  // Cloudflare Workers cannot open outbound WebSockets with the `new WebSocket()`
+  // constructor — they must be created via fetch() with an Upgrade header, then accept()ed.
+  async function runOnce(): Promise<void> {
+    const resp = await fetch(wsUrl, {
+      headers: {
+        Upgrade: 'websocket',
+        Connection: 'Upgrade',
+        'Sec-WebSocket-Protocol': 'graphql-transport-ws, graphql-ws',
+      },
+    });
+    const ws = resp.webSocket;
+    if (!ws) {
+      console.error(`[containerStats] WebSocket upgrade failed: HTTP ${resp.status}`);
+      return;
+    }
+    // The server echoes the chosen subprotocol; default to the modern one.
+    const isNewProtocol = (resp.headers.get('Sec-WebSocket-Protocol') ?? 'graphql-transport-ws') !== 'graphql-ws';
+    ws.accept();
+
+    await new Promise<void>((resolve) => {
+      signal.addEventListener('abort', () => {
+        try { ws.close(1000, 'done'); } catch { /* already closed */ }
+        resolve();
+      }, { once: true });
+      ws.addEventListener('close', () => resolve());
+      ws.addEventListener('error', () => resolve());
+
+      ws.addEventListener('message', (evt: MessageEvent) => {
+        try {
+          const msg = JSON.parse(evt.data as string) as {
+            type: string;
+            id?: string;
+            payload?: { data?: { dockerContainerStats?: StatMsg } };
+          };
+
+          if (msg.type === 'connection_ack') {
+            // graphql-transport-ws uses 'subscribe'; graphql-ws (older) uses 'start'
+            ws.send(JSON.stringify({
+              id: '1',
+              type: isNewProtocol ? 'subscribe' : 'start',
+              payload: { query: STATS_QUERY },
+            }));
+          } else if (msg.type === 'next' || msg.type === 'data') {
+            // 'next' = graphql-transport-ws, 'data' = graphql-ws
+            const s = msg.payload?.data?.dockerContainerStats;
+            if (s) handleStat(s);
+          } else if (msg.type === 'error') {
+            console.error('[containerStats] subscription error:', JSON.stringify(msg.payload));
+          }
+        } catch { /* ignore parse errors */ }
+      });
+
+      // Workers fetch-based sockets have no 'open' event — send connection_init now.
+      ws.send(JSON.stringify({ type: 'connection_init', payload: { 'x-api-key': apiKey } }));
     });
   }
 
   async function run(): Promise<void> {
     while (!signal.aborted) {
       try {
-        await new Promise<void>((resolve) => {
-          // Offer both protocols; the server will select one
-          const ws = new WebSocket(wsUrl, ['graphql-transport-ws', 'graphql-ws']);
-
-          signal.addEventListener('abort', () => { ws.close(1000, 'done'); resolve(); }, { once: true });
-          ws.addEventListener('close', () => resolve());
-          ws.addEventListener('error', () => resolve());
-
-          ws.addEventListener('open', () => {
-            ws.send(JSON.stringify({ type: 'connection_init', payload: { 'x-api-key': apiKey } }));
-          });
-
-          ws.addEventListener('message', (evt: MessageEvent) => {
-            try {
-              const msg = JSON.parse(evt.data as string) as {
-                type: string;
-                id?: string;
-                payload?: { data?: { dockerContainerStats?: { id: string; cpuPercent: number; memUsage: string; networkRxBytes?: number; networkTxBytes?: number } } };
-              };
-
-              if (msg.type === 'connection_ack') {
-                // graphql-transport-ws uses 'subscribe'; graphql-ws (older) uses 'start'
-                const isNewProtocol = ws.protocol === 'graphql-transport-ws';
-                ws.send(JSON.stringify({
-                  id: '1',
-                  type: isNewProtocol ? 'subscribe' : 'start',
-                  payload: { query: STATS_QUERY },
-                }));
-              } else if (msg.type === 'next' || msg.type === 'data') {
-                // 'next' = graphql-transport-ws, 'data' = graphql-ws
-                const s = msg.payload?.data?.dockerContainerStats;
-                if (s) handleStat(s);
-              }
-            } catch { /* ignore parse errors */ }
-          });
-        });
-      } catch { /* connection failed */ }
-
+        await runOnce();
+      } catch (err) {
+        console.error('[containerStats] connection failed:', err);
+      }
       if (!signal.aborted) await new Promise(r => setTimeout(r, 3000));
     }
   }

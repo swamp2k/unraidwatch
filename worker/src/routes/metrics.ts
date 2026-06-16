@@ -73,7 +73,8 @@ metrics.get('/history/container/:id', async (c) => {
       .all<{ ts: number; cpu_pct: number; mem_mb: number; net_rx_kbps: number; net_tx_kbps: number }>();
 
     return c.json(rows.results);
-  } catch {
+  } catch (err) {
+    console.error('container history query failed:', err);
     return c.json([]);
   }
 });
