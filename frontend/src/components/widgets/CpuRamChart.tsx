@@ -22,13 +22,6 @@ type HistWindow = typeof HIST_WINDOWS[number];
 type Window = typeof LIVE_WINDOWS[number]['label'] | HistWindow;
 
 const ALL_WINDOWS: Window[] = ['2m', '5m', '15m', '30m', '1h', '6h', '24h', '7d'];
-const HIST_WINDOW_SECONDS: Record<HistWindow, number> = {
-  '1h': 3600,
-  '6h': 21600,
-  '24h': 86400,
-  '7d': 604800,
-};
-
 // SSE fires every 5s, so points × 5 = seconds for live windows
 const LIVE_WINDOW_SECONDS: Record<typeof LIVE_WINDOWS[number]['label'], number> = {
   '2m': 120, '5m': 300, '15m': 900, '30m': 1800,
