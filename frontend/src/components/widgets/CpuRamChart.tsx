@@ -3,7 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend } from 'recharts';
 import { api } from '../../lib/api';
 
-interface ChartPoint { time: string; cpu: number; ram: number; temp?: number }
+interface ChartPoint { ts?: number; time: string; cpu: number; ram: number; temp?: number }
 interface ApiPoint { ts: number; cpu_pct: number; ram_pct: number }
 
 interface Props {
@@ -22,6 +22,12 @@ type HistWindow = typeof HIST_WINDOWS[number];
 type Window = typeof LIVE_WINDOWS[number]['label'] | HistWindow;
 
 const ALL_WINDOWS: Window[] = ['2m', '5m', '15m', '30m', '1h', '6h', '24h', '7d'];
+const HIST_WINDOW_SECONDS: Record<HistWindow, number> = {
+  '1h': 3600,
+  '6h': 21600,
+  '24h': 86400,
+  '7d': 604800,
+};
 
 function formatTs(ts: number, window: HistWindow): string {
   const d = new Date(ts * 1000);
@@ -47,11 +53,28 @@ export function CpuRamChart({ history }: Props) {
 
   let displayData: ChartPoint[];
   if (isHistorical) {
-    displayData = (apiData ?? []).map(p => ({
-      time: formatTs(p.ts, window as HistWindow),
-      cpu: p.cpu_pct,
-      ram: p.ram_pct,
-    }));
+    const histWindow = window as HistWindow;
+    const points = new Map<number, ChartPoint>();
+    for (const p of apiData ?? []) {
+      points.set(p.ts, {
+        ts: p.ts,
+        time: formatTs(p.ts, histWindow),
+        cpu: p.cpu_pct,
+        ram: p.ram_pct,
+      });
+    }
+
+    if (histWindow === '1h') {
+      const cutoff = Math.floor(Date.now() / 1000) - HIST_WINDOW_SECONDS[histWindow];
+      for (const p of history) {
+        if (p.ts === undefined || p.ts < cutoff) continue;
+        points.set(p.ts, p);
+      }
+    }
+
+    displayData = [...points.entries()]
+      .sort(([a], [b]) => a - b)
+      .map(([, p]) => p);
   } else {
     const liveWindow = LIVE_WINDOWS.find(w => w.label === window)!;
     displayData = history.slice(-liveWindow.points);

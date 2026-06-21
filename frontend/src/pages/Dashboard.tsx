@@ -32,8 +32,8 @@ import { ArrayStatus } from '../components/widgets/ArrayStatus';
 import { SharesOverview } from '../components/widgets/SharesOverview';
 import { RecentAlerts } from '../components/widgets/RecentAlerts';
 
-interface ChartPoint { time: string; cpu: number; ram: number; temp: number }
-interface NetPoint   { time: string; rx: number; tx: number }
+interface ChartPoint { ts: number; time: string; cpu: number; ram: number; temp: number }
+interface NetPoint   { ts: number; time: string; rx: number; tx: number }
 
 function WidgetRenderer({ id, sse, history, netHistory }: {
   id: string;
@@ -67,9 +67,10 @@ export function Dashboard() {
 
   useEffect(() => {
     if (!sse.stats) return;
-    const now = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-    setHistory(h => [...h.slice(-359), { time: now, cpu: sse.stats!.cpu_pct, ram: sse.stats!.ram_pct, temp: sse.stats!.temp_avg }]);
-    setNetHistory(h => [...h.slice(-359), { time: now, rx: sse.stats!.net_rx_kbps ?? 0, tx: sse.stats!.net_tx_kbps ?? 0 }]);
+    const ts = Math.floor(Date.now() / 1000);
+    const time = new Date(ts * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    setHistory(h => [...h.slice(-359), { ts, time, cpu: sse.stats!.cpu_pct, ram: sse.stats!.ram_pct, temp: sse.stats!.temp_avg }]);
+    setNetHistory(h => [...h.slice(-359), { ts, time, rx: sse.stats!.net_rx_kbps ?? 0, tx: sse.stats!.net_tx_kbps ?? 0 }]);
   }, [sse.stats]);
 
   const { data: savedLayout } = useQuery<WidgetConfig[]>({

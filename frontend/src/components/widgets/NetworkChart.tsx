@@ -4,7 +4,7 @@ import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend } f
 import { api } from '../../lib/api';
 import { formatKbps } from '../../lib/format';
 
-interface NetPoint { time: string; rx: number; tx: number }
+interface NetPoint { ts?: number; time: string; rx: number; tx: number }
 interface ApiPoint { ts: number; net_rx_kbps: number; net_tx_kbps: number }
 
 interface Props {
@@ -23,6 +23,12 @@ type HistWindow = typeof HIST_WINDOWS[number];
 type Window = typeof LIVE_WINDOWS[number]['label'] | HistWindow;
 
 const ALL_WINDOWS: Window[] = ['2m', '5m', '15m', '30m', '1h', '6h', '24h', '7d'];
+const HIST_WINDOW_SECONDS: Record<HistWindow, number> = {
+  '1h': 3600,
+  '6h': 21600,
+  '24h': 86400,
+  '7d': 604800,
+};
 
 function formatTs(ts: number, window: HistWindow): string {
   const d = new Date(ts * 1000);
@@ -51,13 +57,29 @@ export function NetworkChart({ liveHistory }: Props) {
 
   let displayData: NetPoint[];
   if (isHistorical) {
-    displayData = (apiData ?? [])
-      .filter(p => p.net_rx_kbps > 0 || p.net_tx_kbps > 0)
-      .map(p => ({
-        time: formatTs(p.ts, window as HistWindow),
+    const histWindow = window as HistWindow;
+    const points = new Map<number, NetPoint>();
+    for (const p of apiData ?? []) {
+      if (p.net_rx_kbps <= 0 && p.net_tx_kbps <= 0) continue;
+      points.set(p.ts, {
+        ts: p.ts,
+        time: formatTs(p.ts, histWindow),
         rx: p.net_rx_kbps,
         tx: p.net_tx_kbps,
-      }));
+      });
+    }
+
+    if (histWindow === '1h') {
+      const cutoff = Math.floor(Date.now() / 1000) - HIST_WINDOW_SECONDS[histWindow];
+      for (const p of liveHistory) {
+        if (p.ts === undefined || p.ts < cutoff) continue;
+        points.set(p.ts, p);
+      }
+    }
+
+    displayData = [...points.entries()]
+      .sort(([a], [b]) => a - b)
+      .map(([, p]) => p);
   } else {
     const liveWindow = LIVE_WINDOWS.find(w => w.label === window)!;
     displayData = liveHistory.slice(-liveWindow.points);
