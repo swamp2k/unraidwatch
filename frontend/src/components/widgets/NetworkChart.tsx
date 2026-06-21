@@ -12,8 +12,8 @@ interface Props {
 }
 
 const LIVE_WINDOWS = [
-  { label: '2m',  points: 24 },
-  { label: '5m',  points: 60 },
+  { label: '2m',  points: 24  },
+  { label: '5m',  points: 60  },
   { label: '15m', points: 180 },
   { label: '30m', points: 360 },
 ] as const;
@@ -28,6 +28,10 @@ const HIST_WINDOW_SECONDS: Record<HistWindow, number> = {
   '6h': 21600,
   '24h': 86400,
   '7d': 604800,
+};
+
+const LIVE_WINDOW_SECONDS: Record<typeof LIVE_WINDOWS[number]['label'], number> = {
+  '2m': 120, '5m': 300, '15m': 900, '30m': 1800,
 };
 
 function formatTs(ts: number, window: HistWindow): string {
@@ -45,51 +49,82 @@ function formatTooltip(v: number) {
 
 export function NetworkChart({ liveHistory }: Props) {
   const [window, setWindow] = useState<Window>('1h');
-  const isHistorical = (HIST_WINDOWS as readonly string[]).includes(window);
 
-  const { data: apiData, isLoading } = useQuery<ApiPoint[]>({
-    queryKey: ['metrics-history', window],
-    queryFn: () => api.get<ApiPoint[]>(`/api/metrics/history?window=${window}`),
-    enabled: isHistorical,
+  const isLongHistorical = window === '6h' || window === '24h' || window === '7d';
+
+  // Always fetch 1h DB data — baseline for the 1h view and live-window supplements
+  const { data: hourData, isLoading: hourLoading } = useQuery<ApiPoint[]>({
+    queryKey: ['metrics-history', '1h'],
+    queryFn: () => api.get<ApiPoint[]>('/api/metrics/history?window=1h'),
     refetchInterval: 60_000,
     staleTime: 30_000,
   });
 
-  let displayData: NetPoint[];
-  if (isHistorical) {
-    const histWindow = window as HistWindow;
-    const points = new Map<number, NetPoint>();
-    for (const p of apiData ?? []) {
-      if (p.net_rx_kbps <= 0 && p.net_tx_kbps <= 0) continue;
-      points.set(p.ts, {
-        ts: p.ts,
-        time: formatTs(p.ts, histWindow),
-        rx: p.net_rx_kbps,
-        tx: p.net_tx_kbps,
-      });
-    }
+  // For 6h / 24h / 7d fetch their specific bucket sizes
+  const { data: longData, isLoading: longLoading } = useQuery<ApiPoint[]>({
+    queryKey: ['metrics-history', window],
+    queryFn: () => api.get<ApiPoint[]>(`/api/metrics/history?window=${window}`),
+    enabled: isLongHistorical,
+    refetchInterval: 60_000,
+    staleTime: 30_000,
+  });
 
-    if (histWindow === '1h') {
-      const cutoff = Math.floor(Date.now() / 1000) - HIST_WINDOW_SECONDS[histWindow];
-      for (const p of liveHistory) {
-        if (p.ts === undefined || p.ts < cutoff) continue;
+  const isLoading = isLongHistorical ? longLoading : hourLoading;
+
+  let displayData: NetPoint[];
+
+  if (isLongHistorical) {
+    // 6h / 24h / 7d — pure DB data, no live merge
+    const histWindow = window as HistWindow;
+    displayData = (longData ?? []).map(p => ({
+      ts: p.ts,
+      time: formatTs(p.ts, histWindow),
+      rx: p.net_rx_kbps,
+      tx: p.net_tx_kbps,
+    }));
+  } else if (window === '1h') {
+    // 1h — DB is the backbone; live data fills only the current-minute gap
+    const points = new Map<number, NetPoint>();
+    const lastDbTs = hourData && hourData.length > 0
+      ? Math.max(...hourData.map(p => p.ts))
+      : 0;
+
+    for (const p of hourData ?? []) {
+      points.set(p.ts, { ts: p.ts, time: formatTs(p.ts, '1h'), rx: p.net_rx_kbps, tx: p.net_tx_kbps });
+    }
+    // Only add live points strictly newer than the last DB bucket
+    for (const p of liveHistory) {
+      if (p.ts === undefined || p.ts <= lastDbTs) continue;
+      points.set(p.ts, p);
+    }
+    displayData = [...points.entries()].sort(([a], [b]) => a - b).map(([, p]) => p);
+  } else {
+    // Live windows — use SSE buffer when full; backfill from DB when buffer is short
+    const liveWindow = LIVE_WINDOWS.find(w => w.label === window)!;
+    const liveSlice = liveHistory.slice(-liveWindow.points);
+
+    if (liveSlice.length >= liveWindow.points) {
+      displayData = liveSlice;
+    } else {
+      const windowSeconds = LIVE_WINDOW_SECONDS[window as typeof LIVE_WINDOWS[number]['label']];
+      const cutoff = Math.floor(Date.now() / 1000) - windowSeconds;
+      const oldestLiveTs = liveSlice.length > 0 ? (liveSlice[0].ts ?? Infinity) : Infinity;
+
+      const points = new Map<number, NetPoint>();
+      for (const p of hourData ?? []) {
+        if (p.ts < cutoff || p.ts >= oldestLiveTs) continue;
+        points.set(p.ts, { ts: p.ts, time: formatTs(p.ts, '1h'), rx: p.net_rx_kbps, tx: p.net_tx_kbps });
+      }
+      for (const p of liveSlice) {
+        if (p.ts === undefined) continue;
         points.set(p.ts, p);
       }
+      displayData = [...points.entries()].sort(([a], [b]) => a - b).map(([, p]) => p);
     }
-
-    displayData = [...points.entries()]
-      .sort(([a], [b]) => a - b)
-      .map(([, p]) => p);
-  } else {
-    const liveWindow = LIVE_WINDOWS.find(w => w.label === window)!;
-    displayData = liveHistory.slice(-liveWindow.points);
   }
 
   const tickInterval = Math.max(1, Math.floor(displayData.length / 6));
-
-  const noData = isHistorical
-    ? (isLoading ? 'Loading…' : 'No network data — requires Unraid 7.x with Connect API')
-    : 'Collecting data…';
+  const noData = isLoading ? 'Loading…' : 'Collecting data…';
 
   return (
     <div className="card">
