@@ -11,8 +11,8 @@ interface Props {
 }
 
 const LIVE_WINDOWS = [
-  { label: '2m',  points: 24 },
-  { label: '5m',  points: 60 },
+  { label: '2m',  points: 24  },
+  { label: '5m',  points: 60  },
   { label: '15m', points: 180 },
   { label: '30m', points: 360 },
 ] as const;
@@ -29,6 +29,11 @@ const HIST_WINDOW_SECONDS: Record<HistWindow, number> = {
   '7d': 604800,
 };
 
+// SSE fires every 5s, so points × 5 = seconds for live windows
+const LIVE_WINDOW_SECONDS: Record<typeof LIVE_WINDOWS[number]['label'], number> = {
+  '2m': 120, '5m': 300, '15m': 900, '30m': 1800,
+};
+
 function formatTs(ts: number, window: HistWindow): string {
   const d = new Date(ts * 1000);
   if (window === '7d') {
@@ -41,50 +46,82 @@ function formatTs(ts: number, window: HistWindow): string {
 export function CpuRamChart({ history }: Props) {
   const [window, setWindow] = useState<Window>('1h');
 
-  const isHistorical = (HIST_WINDOWS as readonly string[]).includes(window);
+  const isLongHistorical = window === '6h' || window === '24h' || window === '7d';
 
-  const { data: apiData, isLoading } = useQuery<ApiPoint[]>({
-    queryKey: ['metrics-history', window],
-    queryFn: () => api.get<ApiPoint[]>(`/api/metrics/history?window=${window}`),
-    enabled: isHistorical,
+  // Always fetch 1h DB data — baseline for the 1h view and live-window supplements
+  const { data: hourData, isLoading: hourLoading } = useQuery<ApiPoint[]>({
+    queryKey: ['metrics-history', '1h'],
+    queryFn: () => api.get<ApiPoint[]>('/api/metrics/history?window=1h'),
     refetchInterval: 60_000,
     staleTime: 30_000,
   });
 
-  let displayData: ChartPoint[];
-  if (isHistorical) {
-    const histWindow = window as HistWindow;
-    const points = new Map<number, ChartPoint>();
-    for (const p of apiData ?? []) {
-      points.set(p.ts, {
-        ts: p.ts,
-        time: formatTs(p.ts, histWindow),
-        cpu: p.cpu_pct,
-        ram: p.ram_pct,
-      });
-    }
+  // For 6h / 24h / 7d fetch their specific bucket sizes
+  const { data: longData, isLoading: longLoading } = useQuery<ApiPoint[]>({
+    queryKey: ['metrics-history', window],
+    queryFn: () => api.get<ApiPoint[]>(`/api/metrics/history?window=${window}`),
+    enabled: isLongHistorical,
+    refetchInterval: 60_000,
+    staleTime: 30_000,
+  });
 
-    if (histWindow === '1h') {
-      const cutoff = Math.floor(Date.now() / 1000) - HIST_WINDOW_SECONDS[histWindow];
-      for (const p of history) {
-        if (p.ts === undefined || p.ts < cutoff) continue;
+  const isLoading = isLongHistorical ? longLoading : hourLoading;
+
+  let displayData: ChartPoint[];
+
+  if (isLongHistorical) {
+    // 6h / 24h / 7d — pure DB data, no live merge
+    const histWindow = window as HistWindow;
+    displayData = (longData ?? []).map(p => ({
+      ts: p.ts,
+      time: formatTs(p.ts, histWindow),
+      cpu: p.cpu_pct,
+      ram: p.ram_pct,
+    }));
+  } else if (window === '1h') {
+    // 1h — DB is the backbone; live data fills only the current-minute gap
+    const points = new Map<number, ChartPoint>();
+    const lastDbTs = hourData && hourData.length > 0
+      ? Math.max(...hourData.map(p => p.ts))
+      : 0;
+
+    for (const p of hourData ?? []) {
+      points.set(p.ts, { ts: p.ts, time: formatTs(p.ts, '1h'), cpu: p.cpu_pct, ram: p.ram_pct });
+    }
+    // Only add live points strictly newer than the last DB bucket to avoid density distortion
+    for (const p of history) {
+      if (p.ts === undefined || p.ts <= lastDbTs) continue;
+      points.set(p.ts, p);
+    }
+    displayData = [...points.entries()].sort(([a], [b]) => a - b).map(([, p]) => p);
+  } else {
+    // Live windows — use SSE buffer when full; backfill from DB when buffer is short
+    const liveWindow = LIVE_WINDOWS.find(w => w.label === window)!;
+    const liveSlice = history.slice(-liveWindow.points);
+
+    if (liveSlice.length >= liveWindow.points) {
+      displayData = liveSlice;
+    } else {
+      const windowSeconds = LIVE_WINDOW_SECONDS[window as typeof LIVE_WINDOWS[number]['label']];
+      const cutoff = Math.floor(Date.now() / 1000) - windowSeconds;
+      const oldestLiveTs = liveSlice.length > 0 ? (liveSlice[0].ts ?? Infinity) : Infinity;
+
+      const points = new Map<number, ChartPoint>();
+      // DB fills the older portion before live buffer starts
+      for (const p of hourData ?? []) {
+        if (p.ts < cutoff || p.ts >= oldestLiveTs) continue;
+        points.set(p.ts, { ts: p.ts, time: formatTs(p.ts, '1h'), cpu: p.cpu_pct, ram: p.ram_pct });
+      }
+      for (const p of liveSlice) {
+        if (p.ts === undefined) continue;
         points.set(p.ts, p);
       }
+      displayData = [...points.entries()].sort(([a], [b]) => a - b).map(([, p]) => p);
     }
-
-    displayData = [...points.entries()]
-      .sort(([a], [b]) => a - b)
-      .map(([, p]) => p);
-  } else {
-    const liveWindow = LIVE_WINDOWS.find(w => w.label === window)!;
-    displayData = history.slice(-liveWindow.points);
   }
 
   const tickInterval = Math.max(1, Math.floor(displayData.length / 6));
-
-  const placeholder = isHistorical && isLoading
-    ? 'Loading…'
-    : 'Collecting data…';
+  const placeholder = isLoading ? 'Loading…' : 'Collecting data…';
 
   return (
     <div className="card">
