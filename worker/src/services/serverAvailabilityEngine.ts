@@ -12,7 +12,7 @@ interface ServerAvailabilityRow {
   availability_alerted: number;
 }
 
-const GRACE_SECONDS = 120;
+const GRACE_SECONDS = 300;
 
 function formatDuration(seconds: number): string {
   const h = Math.floor(seconds / 3600);
@@ -123,7 +123,7 @@ export async function checkServerAvailability(user: UserRow, env: Env): Promise<
             env,
             user.email,
             '[UnraidWatch] Server Unreachable',
-            `Your Unraid server has been unreachable for over ${formatDuration(GRACE_SECONDS)}.\n\nURL: ${user.url}\n\nView your dashboard: ${env.APP_URL}`,
+            `Your Unraid server has been unreachable for over 5 minutes.\n\nURL: ${user.url}\n\nView your dashboard: ${env.APP_URL}`,
           )
         );
       }
@@ -131,7 +131,7 @@ export async function checkServerAvailability(user: UserRow, env: Env): Promise<
         updates.push(
           sendPushToUser(env, user.id, {
             title: 'Server Unreachable',
-            body: `Unraid at ${user.url} has been offline for over ${formatDuration(GRACE_SECONDS)}.`,
+            body: `Unraid at ${user.url} has been offline for over 5 minutes.`,
             url: '/',
             tag: 'server-availability',
           })

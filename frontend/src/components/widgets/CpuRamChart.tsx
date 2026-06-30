@@ -4,7 +4,7 @@ import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend } f
 import { api } from '../../lib/api';
 
 interface ChartPoint { ts?: number; time: string; cpu: number; ram: number; temp?: number }
-interface ApiPoint { ts: number; cpu_pct: number; ram_pct: number }
+interface ApiPoint { ts: number; cpu_pct: number; ram_pct: number; temp_avg: number }
 
 interface Props {
   history: ChartPoint[];
@@ -70,6 +70,7 @@ export function CpuRamChart({ history }: Props) {
       time: formatTs(p.ts, histWindow),
       cpu: p.cpu_pct,
       ram: p.ram_pct,
+      temp: p.temp_avg,
     }));
   } else if (window === '1h') {
     // 1h — DB is the backbone; live data fills only the current-minute gap
@@ -79,7 +80,7 @@ export function CpuRamChart({ history }: Props) {
       : 0;
 
     for (const p of hourData ?? []) {
-      points.set(p.ts, { ts: p.ts, time: formatTs(p.ts, '1h'), cpu: p.cpu_pct, ram: p.ram_pct });
+      points.set(p.ts, { ts: p.ts, time: formatTs(p.ts, '1h'), cpu: p.cpu_pct, ram: p.ram_pct, temp: p.temp_avg });
     }
     // Only add live points strictly newer than the last DB bucket to avoid density distortion
     for (const p of history) {
@@ -103,7 +104,7 @@ export function CpuRamChart({ history }: Props) {
       // DB fills the older portion before live buffer starts
       for (const p of hourData ?? []) {
         if (p.ts < cutoff || p.ts >= oldestLiveTs) continue;
-        points.set(p.ts, { ts: p.ts, time: formatTs(p.ts, '1h'), cpu: p.cpu_pct, ram: p.ram_pct });
+        points.set(p.ts, { ts: p.ts, time: formatTs(p.ts, '1h'), cpu: p.cpu_pct, ram: p.ram_pct, temp: p.temp_avg });
       }
       for (const p of liveSlice) {
         if (p.ts === undefined) continue;
@@ -140,7 +141,7 @@ export function CpuRamChart({ history }: Props) {
         </div>
       ) : (
         <ResponsiveContainer width="100%" height={180}>
-          <AreaChart data={displayData} margin={{ top: 4, right: 4, bottom: 0, left: -8 }}>
+          <AreaChart data={displayData} margin={{ top: 4, right: 8, bottom: 0, left: -8 }}>
             <defs>
               <linearGradient id="gCpu" x1="0" y1="0" x2="0" y2="1">
                 <stop offset="5%"  stopColor="#6366f1" stopOpacity={0.3} />
@@ -150,6 +151,10 @@ export function CpuRamChart({ history }: Props) {
                 <stop offset="5%"  stopColor="#22c55e" stopOpacity={0.3} />
                 <stop offset="95%" stopColor="#22c55e" stopOpacity={0} />
               </linearGradient>
+              <linearGradient id="gTemp" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="5%"  stopColor="#f97316" stopOpacity={0.2} />
+                <stop offset="95%" stopColor="#f97316" stopOpacity={0} />
+              </linearGradient>
             </defs>
             <XAxis
               dataKey="time"
@@ -158,19 +163,30 @@ export function CpuRamChart({ history }: Props) {
               tickLine={false}
             />
             <YAxis
+              yAxisId="pct"
               domain={[0, 100]}
               tick={{ fontSize: 10, fill: 'var(--text-muted)' }}
               unit="%"
               tickLine={false}
               axisLine={false}
             />
+            <YAxis
+              yAxisId="temp"
+              orientation="right"
+              domain={[0, 100]}
+              tick={{ fontSize: 10, fill: 'var(--text-muted)' }}
+              unit="°C"
+              tickLine={false}
+              axisLine={false}
+            />
             <Tooltip
               contentStyle={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 8, fontSize: 12 }}
-              formatter={(v: number) => `${v}%`}
+              formatter={(v: number, name: string) => name === 'Temp' ? [`${v}°C`, name] : [`${v}%`, name]}
             />
             <Legend wrapperStyle={{ fontSize: 11, paddingTop: 8 }} />
-            <Area type="monotone" dataKey="cpu" name="CPU" stroke="#6366f1" fill="url(#gCpu)" strokeWidth={2} dot={false} />
-            <Area type="monotone" dataKey="ram" name="RAM" stroke="#22c55e" fill="url(#gRam)" strokeWidth={2} dot={false} />
+            <Area yAxisId="pct"  type="monotone" dataKey="cpu"  name="CPU"  stroke="#6366f1" fill="url(#gCpu)"  strokeWidth={2} dot={false} />
+            <Area yAxisId="pct"  type="monotone" dataKey="ram"  name="RAM"  stroke="#22c55e" fill="url(#gRam)"  strokeWidth={2} dot={false} />
+            <Area yAxisId="temp" type="monotone" dataKey="temp" name="Temp" stroke="#f97316" fill="url(#gTemp)" strokeWidth={2} dot={false} />
           </AreaChart>
         </ResponsiveContainer>
       )}

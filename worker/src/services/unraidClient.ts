@@ -114,7 +114,7 @@ export async function getStats(url: string, apiKey: string): Promise<UnraidStats
     ram_used_gb: Math.round(usedGb * 10) / 10,
     ram_total_gb: Math.round(totalGb),
     uptime_s: Math.max(0, uptimeS),
-    temp_avg: Math.round(metrics.temperature?.summary?.average ?? 0),
+    temp_avg: Math.round(((metrics.temperature?.summary?.average ?? 32) - 32) * 5 / 9),
     net_rx_kbps: 0,
     net_tx_kbps: 0,
   };

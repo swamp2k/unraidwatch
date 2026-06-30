@@ -32,13 +32,14 @@ metrics.get('/history', async (c) => {
            ROUND(AVG(cpu_pct), 1) AS cpu_pct,
            ROUND(AVG(ram_pct), 1) AS ram_pct,
            ROUND(AVG(COALESCE(net_rx_kbps, 0)), 0) AS net_rx_kbps,
-           ROUND(AVG(COALESCE(net_tx_kbps, 0)), 0) AS net_tx_kbps
+           ROUND(AVG(COALESCE(net_tx_kbps, 0)), 0) AS net_tx_kbps,
+           ROUND(AVG(COALESCE(temp_avg, 0)), 1) AS temp_avg
     FROM system_metrics
     WHERE server_id = ? AND ts > unixepoch() - ?
     GROUP BY (ts / ?)
     ORDER BY ts
   `).bind(bucket, bucket, serverRow.id, seconds, bucket)
-    .all<{ ts: number; cpu_pct: number; ram_pct: number; net_rx_kbps: number; net_tx_kbps: number }>();
+    .all<{ ts: number; cpu_pct: number; ram_pct: number; net_rx_kbps: number; net_tx_kbps: number; temp_avg: number }>();
 
   return c.json(rows.results);
 });

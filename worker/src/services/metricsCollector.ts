@@ -63,8 +63,8 @@ export async function collectMetrics(user: UserRow, env: Env): Promise<void> {
       const retentionS = await getRetentionSeconds(env.DB, user.id, 'system');
       try {
         await env.DB.prepare(
-          'INSERT OR IGNORE INTO system_metrics (server_id, ts, cpu_pct, ram_pct, net_rx_kbps, net_tx_kbps) VALUES (?, ?, ?, ?, ?, ?)'
-        ).bind(serverId, ts, stats.cpu_pct, stats.ram_pct, rx, tx).run();
+          'INSERT OR IGNORE INTO system_metrics (server_id, ts, cpu_pct, ram_pct, net_rx_kbps, net_tx_kbps, temp_avg) VALUES (?, ?, ?, ?, ?, ?, ?)'
+        ).bind(serverId, ts, stats.cpu_pct, stats.ram_pct, rx, tx, stats.temp_avg).run();
         await env.DB.prepare(
           'DELETE FROM system_metrics WHERE server_id = ? AND ts < unixepoch() - ?'
         ).bind(serverId, retentionS).run();
