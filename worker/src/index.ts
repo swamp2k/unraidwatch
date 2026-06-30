@@ -15,6 +15,7 @@ import { evaluateAlerts } from './services/alertEngine';
 import { evaluateDockerMonitors } from './services/dockerMonitorEngine';
 import { evaluateLogMonitors } from './services/logMonitorEngine';
 import { collectMetrics } from './services/metricsCollector';
+import { checkServerAvailability } from './services/serverAvailabilityEngine';
 import monitorRoutes from './routes/monitors';
 import metricsRoutes from './routes/metrics';
 import settingsRoutes from './routes/settings';
@@ -69,6 +70,7 @@ export default {
         ctx.waitUntil(evaluateDockerMonitors(user, env));
         ctx.waitUntil(evaluateLogMonitors(user, env));
         ctx.waitUntil(collectMetrics(user, env));
+        ctx.waitUntil(checkServerAvailability(user, env));
       }
       return;
     }

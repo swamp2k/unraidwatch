@@ -13,7 +13,8 @@ import {
 } from '../lib/push';
 
 function ServerConfig() {
-  const { data } = useQuery<{ label: string; url: string; verified_at: number | null } | null>({
+  const qc = useQueryClient();
+  const { data } = useQuery<{ label: string; url: string; verified_at: number | null; availability_enabled: number } | null>({
     queryKey: ['server-config'],
     queryFn: () => api.get('/api/server'),
   });
@@ -27,6 +28,11 @@ function ServerConfig() {
   useEffect(() => {
     if (data) { setLabel(data.label); setUrl(data.url); }
   }, [data]);
+
+  const toggleAvailability = useMutation({
+    mutationFn: (enabled: boolean) => api.patch('/api/server/availability', { enabled }),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ['server-config'] }),
+  });
 
   function ok(s: string)  { setMsg(s); setMsgOk(true); }
   function err(s: string) { setMsg(s); setMsgOk(false); }
@@ -61,6 +67,25 @@ function ServerConfig() {
           <button type="submit" className="btn-primary" disabled={save.isPending}>{save.isPending ? 'Saving…' : 'Save'}</button>
         </div>
       </form>
+
+      {data && (
+        <div style={{ marginTop: 24, paddingTop: 20, borderTop: '1px solid var(--border)' }}>
+          <div style={{ fontWeight: 500, fontSize: 14, marginBottom: 4 }}>Availability monitoring</div>
+          <p style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 12 }}>
+            Alert when the server goes offline, and again when it comes back. Checks every minute with a 2-minute grace period before alerting.
+          </p>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 10, textTransform: 'none', letterSpacing: 0, fontSize: 14, cursor: 'pointer' }}>
+            <input
+              type="checkbox"
+              style={{ width: 'auto' }}
+              checked={!!data.availability_enabled}
+              disabled={toggleAvailability.isPending}
+              onChange={e => toggleAvailability.mutate(e.target.checked)}
+            />
+            Alert when server goes offline
+          </label>
+        </div>
+      )}
     </div>
   );
 }

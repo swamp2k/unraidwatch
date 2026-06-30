@@ -31,6 +31,9 @@ export interface ServerConfig {
   url: string;
   api_key: string;
   verified_at: number | null;
+  availability_enabled: number;
+  offline_since: number | null;
+  last_online_at: number | null;
   created_at: number;
   updated_at: number;
 }
@@ -113,7 +116,7 @@ export interface LogMonitor {
 export interface MonitorEvent {
   id: string;
   user_id: string;
-  monitor_type: 'docker' | 'log';
+  monitor_type: 'docker' | 'log' | 'server_availability';
   monitor_id: string;
   monitor_name: string;
   detail: string;
