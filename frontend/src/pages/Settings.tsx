@@ -25,13 +25,21 @@ function ServerConfig() {
   const [msgOk, setMsgOk] = useState(true);
   const [testing, setTesting] = useState(false);
 
+  const [availabilityEnabled, setAvailabilityEnabled] = useState(false);
+
   useEffect(() => {
-    if (data) { setLabel(data.label); setUrl(data.url); }
+    if (data) {
+      setLabel(data.label);
+      setUrl(data.url);
+      setAvailabilityEnabled(!!data.availability_enabled);
+    }
   }, [data]);
 
   const toggleAvailability = useMutation({
     mutationFn: (enabled: boolean) => api.patch('/api/server/availability', { enabled }),
+    onMutate: (enabled) => setAvailabilityEnabled(enabled),
     onSuccess: () => void qc.invalidateQueries({ queryKey: ['server-config'] }),
+    onError: () => setAvailabilityEnabled(!!data?.availability_enabled),
   });
 
   function ok(s: string)  { setMsg(s); setMsgOk(true); }
@@ -78,7 +86,7 @@ function ServerConfig() {
             <input
               type="checkbox"
               style={{ width: 'auto' }}
-              checked={!!data.availability_enabled}
+              checked={availabilityEnabled}
               disabled={toggleAvailability.isPending}
               onChange={e => toggleAvailability.mutate(e.target.checked)}
             />

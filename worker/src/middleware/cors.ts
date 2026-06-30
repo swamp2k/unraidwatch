@@ -9,7 +9,7 @@ export const corsMiddleware = createMiddleware<{ Bindings: Env }>(async (c, next
     return new Response(null, {
       headers: {
         'Access-Control-Allow-Origin': origin === allowed ? origin : allowed,
-        'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
+        'Access-Control-Allow-Methods': 'GET, POST, PUT, PATCH, DELETE, OPTIONS',
         'Access-Control-Allow-Headers': 'Content-Type',
         'Access-Control-Allow-Credentials': 'true',
         'Access-Control-Max-Age': '86400',
