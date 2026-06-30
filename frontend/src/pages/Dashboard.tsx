@@ -56,6 +56,12 @@ function WidgetRenderer({ id, sse, history, netHistory }: {
   }
 }
 
+interface ServerStatus {
+  availability_enabled: number;
+  offline_since: number | null;
+  last_online_at: number | null;
+}
+
 export function Dashboard() {
   const qc = useQueryClient();
   const sse = useSSE();
@@ -64,6 +70,12 @@ export function Dashboard() {
   const historyRef = useRef(history);
   historyRef.current = history;
   const [editMode, setEditMode] = useState(false);
+
+  const { data: serverStatus } = useQuery<ServerStatus | null>({
+    queryKey: ['server-config'],
+    queryFn: () => api.get('/api/server'),
+    refetchInterval: 60_000,
+  });
 
   useEffect(() => {
     if (!sse.stats) return;
@@ -131,6 +143,25 @@ export function Dashboard() {
     <>
       <TopBar title="Dashboard" />
       <div className="page">
+        {serverStatus?.availability_enabled && serverStatus.offline_since && (
+          <div style={{
+            background: 'var(--danger)',
+            color: '#fff',
+            borderRadius: 8,
+            padding: '10px 16px',
+            marginBottom: 16,
+            fontSize: 13,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
+          }}>
+            <span style={{ fontWeight: 600 }}>Server offline</span>
+            <span style={{ opacity: 0.85 }}>
+              — unreachable since {new Date(serverStatus.offline_since * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+            </span>
+          </div>
+        )}
+
         {/* Edit mode controls */}
         <div className="flex justify-between items-center mb-4">
           <div />

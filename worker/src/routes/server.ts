@@ -11,10 +11,22 @@ server.use('*', authMiddleware);
 server.get('/', async (c) => {
   const user = c.get('user');
   const row = await c.env.DB.prepare(
-    'SELECT id, user_id, label, url, verified_at, created_at, updated_at FROM servers WHERE user_id = ?'
+    `SELECT id, user_id, label, url, verified_at,
+            availability_enabled, offline_since, last_online_at,
+            created_at, updated_at
+     FROM servers WHERE user_id = ?`
   ).bind(user.id).first<Omit<ServerConfig, 'api_key'>>();
   if (!row) return c.json(null);
   return c.json(row);
+});
+
+server.patch('/availability', async (c) => {
+  const user = c.get('user');
+  const { enabled } = await c.req.json<{ enabled: boolean }>();
+  await c.env.DB.prepare(
+    'UPDATE servers SET availability_enabled = ? WHERE user_id = ?'
+  ).bind(enabled ? 1 : 0, user.id).run();
+  return c.json({ ok: true });
 });
 
 server.put('/', async (c) => {
