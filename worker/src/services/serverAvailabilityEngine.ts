@@ -1,6 +1,4 @@
 import type { Env, UserRow } from '../types';
-import { decrypt } from './encryption';
-import { getStats } from './unraidClient';
 import { sendEmail } from './emailService';
 import { sendPushToUser } from './webPush';
 
@@ -30,12 +28,13 @@ export async function checkServerAvailability(user: UserRow, env: Env): Promise<
 
     if (!server || !server.availability_enabled) return;
 
-    const apiKey = await decrypt(user.api_key, env);
     const now = Math.floor(Date.now() / 1000);
     let reachable = true;
 
     try {
-      await getStats(user.url, apiKey);
+      // Simple HTTP reachability check — any response (even 4xx/5xx) means the
+      // host is up. Only a network failure or timeout means truly unreachable.
+      await fetch(user.url, { method: 'HEAD', signal: AbortSignal.timeout(5000) });
     } catch {
       reachable = false;
     }
