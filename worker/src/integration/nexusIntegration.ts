@@ -6,6 +6,7 @@ import {
   CONTRACT_VERSION,
   IntegrationError,
   type IntegrationIdentityDto,
+  type OverviewSection,
   type UnraidArrayDto,
   type UnraidContainerDto,
   type UnraidDiskDto,
@@ -154,7 +155,7 @@ export async function identify(env: Env, token: string): Promise<IntegrationIden
 
   return {
     contractVersion: CONTRACT_VERSION,
-    serverLabel: server?.label ?? '',
+    serverLabel: server?.label ?? null,
     serverConfigured: server !== null,
     scope: 'read',
   };
@@ -167,29 +168,46 @@ export async function getOverview(env: Env, token: string): Promise<UnraidOvervi
   if (cached && Date.now() - cached.at < OVERVIEW_TTL_MS) return cached.value;
 
   const { url } = server;
-  // Partial results are useful: a missing UPS or an unreadable VM list should
-  // not blank the whole page. Stats failing does mean the server is unreachable.
+  // Partial results are useful: an unreadable VM list should not blank the whole
+  // page. Stats is the exception — if it fails the server is unreachable and the
+  // whole call fails. Sections that fail are reported in `unavailable` rather
+  // than being faked, so the consumer can tell "could not read" from "empty".
+  const unavailable: OverviewSection[] = [];
+  const failed = <T>(section: OverviewSection, fallback: T) => (): T => {
+    unavailable.push(section);
+    return fallback;
+  };
+
   const [stats, array, containers, vms, shares, ups] = await Promise.all([
     upstream(() => unraid.getStats(url, apiKey)),
-    upstream(() => unraid.getArray(url, apiKey)).catch(() => null),
-    upstream(() => unraid.getContainers(url, apiKey)).catch(() => []),
-    upstream(() => unraid.getVMs(url, apiKey)).catch(() => []),
-    upstream(() => unraid.getShares(url, apiKey)).catch(() => []),
+    upstream(() => unraid.getArray(url, apiKey)).catch(failed('array', null)),
+    upstream(() => unraid.getContainers(url, apiKey)).catch(failed('containers', [])),
+    upstream(() => unraid.getVMs(url, apiKey)).catch(failed('vms', [])),
+    upstream(() => unraid.getShares(url, apiKey)).catch(failed('shares', [])),
+    // getUPS resolves null both for "no UPS" and for a failed query, and cannot
+    // distinguish them; it never rejects, so 'ups' is never reported here.
     unraid.getUPS(url, apiKey).catch(() => null),
   ]);
 
   const value: UnraidOverviewDto = {
     contractVersion: CONTRACT_VERSION,
     fetchedAt: new Date().toISOString(),
-    server: { label: server.label, online: server.offline_since === null },
+    server: {
+      label: server.label,
+      // The stats read above round-tripped to the Unraid server, so it is
+      // reachable regardless of what the once-a-minute monitor last recorded.
+      online: true,
+      monitorOfflineSince: server.offline_since === null
+        ? null
+        : new Date(server.offline_since * 1000).toISOString(),
+    },
     stats: toStats(stats),
-    array: array === null
-      ? { status: 'UNKNOWN', capacityUsedTb: 0, capacityTotalTb: 0, disks: [], cache: [] }
-      : toArray(array),
+    array: array === null ? null : toArray(array),
     containers: containers.map(toContainer),
     vms: vms.map(toVm),
     shares: shares.map(toShare),
     ups: toUps(ups),
+    unavailable,
   };
 
   overviewCache.set(server.id, { at: Date.now(), value });

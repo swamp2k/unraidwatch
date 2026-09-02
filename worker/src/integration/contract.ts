@@ -104,28 +104,69 @@ export interface UnraidUpsDto {
 
 export interface UnraidServerDto {
   label: string;
+  /**
+   * Reachable at `fetchedAt`. In a successful overview this is proven true by
+   * the read itself — the stats query round-tripped to the Unraid server.
+   */
   online: boolean;
+  /**
+   * What UnraidWatch's availability monitor believes, as an ISO-8601 instant,
+   * or null when it considers the server up.
+   *
+   * Deliberately separate from `online`: the monitor runs once a minute, so it
+   * can lag reality in both directions. A server that is reachable right now
+   * but still flagged by the monitor is a normal state during recovery.
+   */
+  monitorOfflineSince: string | null;
 }
 
-/** Everything the Nexus Unraid page renders, in one round trip. */
+/**
+ * Sections of an overview that are fetched independently and can report failure.
+ *
+ * UPS is deliberately absent: `getUPS` in services/unraidClient resolves null
+ * for both "no UPS" and "query failed" and cannot distinguish them, so a UPS
+ * failure is not reportable in v1. See the note on `UnraidOverviewDto.ups`.
+ */
+export type OverviewSection = 'array' | 'containers' | 'vms' | 'shares';
+
+/**
+ * Everything the Nexus Unraid page renders, in one round trip.
+ *
+ * Availability is explicit rather than encoded in the values: a section listed
+ * in `unavailable` could not be read this cycle, and its field carries null (or
+ * an empty list) as a placeholder. That keeps null meaning one thing per field —
+ * an empty `containers` with `unavailable` empty means the server really has no
+ * containers, which is genuinely different from "the Docker query failed".
+ */
 export interface UnraidOverviewDto {
   contractVersion: number;
   /** ISO-8601. When UnraidWatch actually read this from the Unraid server. */
   fetchedAt: string;
   server: UnraidServerDto;
   stats: UnraidStatsDto;
-  array: UnraidArrayDto;
+  /** Null only when `unavailable` includes 'array'. */
+  array: UnraidArrayDto | null;
   containers: UnraidContainerDto[];
   vms: UnraidVmDto[];
   shares: UnraidShareDto[];
+  /**
+   * Null for "no UPS configured" — and, in v1 only, also null if the UPS query
+   * failed. These are not distinguishable today; treat null as "nothing to
+   * show". Fixing this at the source is a contract change, not a silent one.
+   */
   ups: UnraidUpsDto | null;
+  /** Empty on a fully successful read. */
+  unavailable: OverviewSection[];
 }
 
 /** Cheap liveness/authorization probe. Does not touch the Unraid server. */
 export interface IntegrationIdentityDto {
   contractVersion: number;
-  /** Label of the Unraid server this token can read. */
-  serverLabel: string;
+  /**
+   * Label of the Unraid server this token can read, or null when the account
+   * has no server saved yet. Never an empty string.
+   */
+  serverLabel: string | null;
   /** False when the account has a token but no Unraid server saved yet. */
   serverConfigured: boolean;
   scope: 'read';

@@ -11,6 +11,15 @@ import { IntegrationError } from './contract';
 const TOKEN_PREFIX = 'uwk_';
 const TOKEN_BYTES = 32;
 
+/**
+ * How stale `last_used_at` may get before we refresh it.
+ *
+ * Consumers poll, so stamping every call would put a D1 write on the hot path
+ * for information that is only ever read by a human looking at the settings
+ * page. Ten minutes of granularity is plenty for "is this token still in use?".
+ */
+const LAST_USED_REFRESH_S = 600;
+
 export interface IntegrationTokenRow {
   id: string;
   user_id: string;
@@ -97,16 +106,22 @@ export async function resolveToken(env: Env, raw: unknown): Promise<{ userId: st
   }
 
   const row = await env.DB.prepare(
-    `SELECT id, user_id FROM integration_tokens WHERE token_hash = ? AND revoked_at IS NULL`
-  ).bind(await hashToken(raw)).first<{ id: string; user_id: string }>();
+    `SELECT id, user_id, last_used_at FROM integration_tokens
+     WHERE token_hash = ? AND revoked_at IS NULL`
+  ).bind(await hashToken(raw)).first<{ id: string; user_id: string; last_used_at: number | null }>();
 
   if (!row) throw new IntegrationError('unauthorized', 'Integration token is unknown or revoked.');
 
-  // Best-effort usage stamp; never fail a read because this write failed.
-  try {
-    await env.DB.prepare('UPDATE integration_tokens SET last_used_at = unixepoch() WHERE id = ?')
-      .bind(row.id).run();
-  } catch { /* ignore */ }
+  // Throttled, best-effort usage stamp. The common polling call issues no write
+  // at all, and a failed write never fails the read.
+  const stale = row.last_used_at === null
+    || Math.floor(Date.now() / 1000) - row.last_used_at >= LAST_USED_REFRESH_S;
+  if (stale) {
+    try {
+      await env.DB.prepare('UPDATE integration_tokens SET last_used_at = unixepoch() WHERE id = ?')
+        .bind(row.id).run();
+    } catch { /* ignore */ }
+  }
 
   return { userId: row.user_id, tokenId: row.id };
 }
