@@ -94,6 +94,28 @@ Set via `wrangler secret put <NAME>`:
 
 `APP_URL` and `ENVIRONMENT` are plain vars in `wrangler.toml`.
 
+## Nexus Integration (contract + transport)
+
+UnraidWatch is the single source of truth for Unraid API behaviour. Consumers such as Nexus never talk to Unraid directly and never receive the Unraid API key.
+
+| Layer | File | Rule |
+|---|---|---|
+| Contract | `worker/src/integration/contract.ts` | Platform-neutral DTOs. No Cloudflare types, no `Env`, no `Request`/`Response`. camelCase, JSON-only, explicit `null`, read-only. Versioned via `CONTRACT_VERSION`. |
+| Service | `worker/src/integration/nexusIntegration.ts` | All behaviour. Plain functions taking `(env, token)`. Calls `services/unraidClient` — never re-queries Unraid itself. |
+| Transport | `NexusIntegration extends WorkerEntrypoint` in `src/index.ts` | Delegation only. Never put logic here. |
+| Tokens | `worker/src/integration/tokens.ts` | SHA-256 hash at rest; raw value returned once at creation. |
+| Management UI | Settings → Integrations | Mint and revoke consumer tokens. |
+
+Consumers bind to it with:
+
+```toml
+services = [{ binding = "UNRAIDWATCH", service = "unraidwatch-api", entrypoint = "NexusIntegration" }]
+```
+
+The design test for any change here: *if Service Bindings disappeared tomorrow, could an HTTP controller in front of `nexusIntegration.ts` keep the DTOs and consumers unchanged?* If not, transport has leaked into the contract. Adding an HTTP transport is a small adapter, not a redesign — do not build one before it is needed.
+
+The token alone decides which UnraidWatch account a consumer may read. Never match consumer user IDs or emails against UnraidWatch's.
+
 ## Key Patterns
 
 - **Encryption**: All API keys stored AES-256-GCM encrypted — see `worker/src/services/encryption.ts`. Decrypt in Worker memory only; never expose to client.

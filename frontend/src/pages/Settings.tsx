@@ -416,11 +416,113 @@ function NotificationConfig() {
   );
 }
 
+interface IntegrationToken {
+  id: string;
+  name: string;
+  consumer: string;
+  hint: string;
+  scope: string;
+  last_used_at: number | null;
+  revoked_at: number | null;
+  created_at: number;
+}
+
+function when(ts: number | null): string {
+  return ts ? new Date(ts * 1000).toLocaleString() : 'never';
+}
+
+function IntegrationsConfig() {
+  const qc = useQueryClient();
+  const { data, isLoading } = useQuery<{ contract_version: number; tokens: IntegrationToken[] }>({
+    queryKey: ['integration-tokens'],
+    queryFn: () => api.get('/api/integrations'),
+  });
+
+  const [name, setName] = useState('Nexus');
+  const [issued, setIssued] = useState<string | null>(null);
+  const [msg, setMsg] = useState('');
+
+  const create = useMutation({
+    mutationFn: () => api.post<{ token: string }>('/api/integrations/tokens', { name }),
+    onSuccess: (res) => {
+      setIssued(res.token);
+      setMsg('');
+      void qc.invalidateQueries({ queryKey: ['integration-tokens'] });
+    },
+    onError: (e: Error) => setMsg(e.message),
+  });
+
+  const revoke = useMutation({
+    mutationFn: (id: string) => api.delete(`/api/integrations/tokens/${id}`),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ['integration-tokens'] }),
+    onError: (e: Error) => setMsg(e.message),
+  });
+
+  if (isLoading) return <div className="card" style={{ maxWidth: 640, color: 'var(--text-muted)', fontSize: 13 }}>Loading…</div>;
+
+  const tokens = data?.tokens ?? [];
+
+  return (
+    <div className="card" style={{ maxWidth: 640 }}>
+      <h3 style={{ fontWeight: 600, marginBottom: 4 }}>Integrations</h3>
+      <p style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 20 }}>
+        Read-only tokens that let another application — Nexus, for example — read this server&apos;s status
+        through UnraidWatch. The consumer never receives your Unraid API key, and a token can be revoked here
+        at any time. Contract v{data?.contract_version ?? 1}.
+      </p>
+
+      <form onSubmit={(e: FormEvent) => { e.preventDefault(); create.mutate(); }}>
+        <div className="form-row"><label>Name</label><input value={name} onChange={e => setName(e.target.value)} placeholder="Nexus" /></div>
+        <div className="form-actions">
+          <button type="submit" className="btn-primary" disabled={create.isPending}>{create.isPending ? 'Creating…' : 'Create token'}</button>
+        </div>
+      </form>
+
+      {issued && (
+        <div style={{ marginTop: 16, padding: 14, border: '1px solid var(--border)', borderRadius: 8 }}>
+          <div style={{ fontWeight: 500, fontSize: 14, marginBottom: 6 }}>Copy this token now</div>
+          <p style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 10 }}>
+            It is shown once and cannot be recovered. Paste it into Nexus under Unraid → Forbindelse.
+          </p>
+          <code style={{ display: 'block', wordBreak: 'break-all', fontSize: 12, marginBottom: 10 }}>{issued}</code>
+          <button type="button" className="btn-ghost" onClick={() => setIssued(null)}>Done</button>
+        </div>
+      )}
+
+      {msg && <p style={{ color: 'var(--danger)', fontSize: 13, marginTop: 12 }}>{msg}</p>}
+
+      <div style={{ marginTop: 24, paddingTop: 20, borderTop: '1px solid var(--border)' }}>
+        <div style={{ fontWeight: 500, fontSize: 14, marginBottom: 12 }}>Existing tokens</div>
+        {tokens.length === 0 && <p style={{ fontSize: 13, color: 'var(--text-muted)' }}>No tokens yet.</p>}
+        {tokens.map(t => (
+          <div key={t.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 0', borderBottom: '1px solid var(--border)' }}>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: 14, opacity: t.revoked_at ? 0.5 : 1 }}>
+                {t.name} <span style={{ color: 'var(--text-muted)' }}>· uwk_{t.hint}…</span>
+              </div>
+              <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                {t.scope} · created {when(t.created_at)} · last used {when(t.last_used_at)}
+                {t.revoked_at && ` · revoked ${when(t.revoked_at)}`}
+              </div>
+            </div>
+            {!t.revoked_at && (
+              <button type="button" className="btn-ghost" disabled={revoke.isPending} onClick={() => revoke.mutate(t.id)}>
+                Revoke
+              </button>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 const settingsTabs = [
   { to: '/settings/server',        label: 'Server' },
   { to: '/settings/ai',            label: 'AI Provider' },
   { to: '/settings/notifications', label: 'Notifications' },
   { to: '/settings/retention',     label: 'Retention' },
+  { to: '/settings/integrations',  label: 'Integrations' },
 ];
 
 export function Settings() {
@@ -440,6 +542,7 @@ export function Settings() {
           <Route path="ai"            element={<AIConfig />} />
           <Route path="notifications" element={<NotificationConfig />} />
           <Route path="retention"     element={<RetentionConfig />} />
+          <Route path="integrations"  element={<IntegrationsConfig />} />
           <Route path="*"             element={<ServerConfig />} />
         </Routes>
       </div>

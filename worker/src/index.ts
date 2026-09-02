@@ -1,5 +1,11 @@
 import { Hono } from 'hono';
+import { WorkerEntrypoint } from 'cloudflare:workers';
 import type { Env } from './types';
+import * as nexusIntegration from './integration/nexusIntegration';
+import type {
+  IntegrationIdentityDto, NexusUnraidIntegration, UnraidArrayDto, UnraidContainerDto,
+  UnraidOverviewDto, UnraidShareDto, UnraidStatsDto, UnraidUpsDto, UnraidVmDto,
+} from './integration/contract';
 import { corsMiddleware } from './middleware/cors';
 import authRoutes from './routes/auth';
 import adminRoutes from './routes/admin';
@@ -19,6 +25,7 @@ import { checkServerAvailability } from './services/serverAvailabilityEngine';
 import monitorRoutes from './routes/monitors';
 import metricsRoutes from './routes/metrics';
 import settingsRoutes from './routes/settings';
+import integrationRoutes from './routes/integrations';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -46,8 +53,47 @@ app.route('/api/detective', detectiveRoutes);
 app.route('/api/monitors', monitorRoutes);
 app.route('/api/metrics', metricsRoutes);
 app.route('/api/settings', settingsRoutes);
+app.route('/api/integrations', integrationRoutes);
 
 app.get('/api/health', (c) => c.json({ ok: true }));
+
+/**
+ * Cloudflare transport adapter for the Nexus integration contract.
+ *
+ * This class is deliberately nothing but delegation. All behaviour lives in
+ * `integration/nexusIntegration.ts`, which knows nothing about Cloudflare RPC —
+ * so putting an HTTP controller in front of the same functions later requires
+ * no change to the contract, the DTOs, or any consumer's rendering code.
+ *
+ * Consumers bind to this with:
+ *   services = [{ binding = "...", service = "unraidwatch-api", entrypoint = "NexusIntegration" }]
+ */
+export class NexusIntegration extends WorkerEntrypoint<Env> implements NexusUnraidIntegration {
+  identify(token: string): Promise<IntegrationIdentityDto> {
+    return nexusIntegration.identify(this.env, token);
+  }
+  getOverview(token: string): Promise<UnraidOverviewDto> {
+    return nexusIntegration.getOverview(this.env, token);
+  }
+  getStats(token: string): Promise<UnraidStatsDto> {
+    return nexusIntegration.getStats(this.env, token);
+  }
+  getArray(token: string): Promise<UnraidArrayDto> {
+    return nexusIntegration.getArray(this.env, token);
+  }
+  getDocker(token: string): Promise<UnraidContainerDto[]> {
+    return nexusIntegration.getDocker(this.env, token);
+  }
+  getVMs(token: string): Promise<UnraidVmDto[]> {
+    return nexusIntegration.getVMs(this.env, token);
+  }
+  getShares(token: string): Promise<UnraidShareDto[]> {
+    return nexusIntegration.getShares(this.env, token);
+  }
+  getUPS(token: string): Promise<UnraidUpsDto | null> {
+    return nexusIntegration.getUPS(this.env, token);
+  }
+}
 
 export default {
   fetch: app.fetch,
